@@ -6,7 +6,7 @@
 @custom-variant dark (&:is(.dark, .dark *));
 
 /* ------------------------------------------------------------------
-   INDUS design tokens — saffron on ink. Light and dark are both first
+   SkOiT design tokens — saffron on ink. Light and dark are both first
    class; contrast ratios are tuned for data-dense analyst reading.
 ------------------------------------------------------------------ */
 :root {
@@ -300,7 +300,7 @@
   animation: sweep 1.5s ease-in-out infinite;
 }
 
-.prose-indus {
+.prose-skoit {
   --tw-prose-body: var(--foreground);
   --tw-prose-headings: var(--foreground);
   --tw-prose-bold: var(--foreground);

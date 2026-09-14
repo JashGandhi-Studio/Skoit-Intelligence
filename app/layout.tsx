@@ -4,10 +4,10 @@ import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "INDUS · OSINT analyst console",
+  title: "SkOiT · OSINT analyst console",
   description:
     "An open-source-intelligence console: it collects from real public sources, shows its coverage honestly, and saves every case file locally.",
-  applicationName: "INDUS",
+  applicationName: "SkOiT",
   robots: { index: false, follow: false },
 };
 
@@ -22,7 +22,7 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("indus-theme");var d=t?t==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;if(d)document.documentElement.classList.add("dark");}catch(e){}})();`;
+const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("skoit-theme") ?? localStorage.getItem("indus-theme");var d=t?t==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;if(d)document.documentElement.classList.add("dark");}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

@@ -31,6 +31,7 @@ const CATEGORY_LABEL: Record<SkillCategory, string> = {
   identity: "Identity",
   comms: "Communications",
   media: "Media & files",
+  retrieval: "Find images, video & news",
   knowledge: "Knowledge",
   tradecraft: "Tradecraft",
 };

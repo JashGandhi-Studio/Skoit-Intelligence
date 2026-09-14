@@ -1,5 +1,5 @@
 /**
- * Core domain model for the INDUS analyst console.
+ * Core domain model for the SkOiT analyst console.
  * Everything the agent discovers is expressed as Evidence — never as prose
  * invented by the model. Prose is only ever a rendering of this data.
  */
@@ -26,6 +26,7 @@ export type SkillCategory =
   | "identity"
   | "comms"
   | "media"
+  | "retrieval"
   | "knowledge"
   | "tradecraft";
 
@@ -49,7 +50,7 @@ export interface SourceRef {
   id: string;
   label: string;
   url?: string;
-  kind: "api" | "dns" | "registry" | "dataset" | "local" | "document";
+  kind: "api" | "dns" | "registry" | "dataset" | "archive" | "local" | "document";
   accessedAt: number;
 }
 
@@ -103,6 +104,72 @@ export interface SkillError {
   status?: number;
 }
 
+/** A licence-clear image or video returned by a retrieval skill. */
+export interface MediaItem {
+  id: string;
+  kind: "image" | "video";
+  title: string;
+  /** Direct asset URL — safe to use in an img/video tag and to download. */
+  url: string;
+  /** Landing page that documents the asset, its author and its licence. */
+  pageUrl?: string;
+  thumbnailUrl?: string;
+  source: string;
+  sourceId?: string;
+  licence?: string;
+  licenceUrl?: string;
+  author?: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  bytes?: number;
+  mime?: string;
+  publishedAt?: number;
+  query?: string;
+}
+
+/**
+ * A findable article or news item. `corroborations` counts how many *distinct*
+ * domains carried the same story — one domain means single-source, and that is
+ * stated rather than smoothed over.
+ */
+export interface ArticleItem {
+  id: string;
+  title: string;
+  url: string;
+  domain: string;
+  source: string;
+  sourceId?: string;
+  snippet?: string;
+  publishedAt?: number;
+  language?: string;
+  country?: string;
+  imageUrl?: string;
+  corroborations?: number;
+  corroborating?: string[];
+  syndicated?: boolean;
+  query?: string;
+}
+
+export interface AnswerPreferences {
+  /** focused = answer exactly what was asked; deep = collect everything relevant. */
+  focus: "focused" | "standard" | "deep";
+  media: { images: boolean; videos: boolean; articles: boolean; news: boolean };
+  /** reusable = commercial-use / public-domain style licences only. */
+  licence: "any" | "reusable";
+  /** Results requested per source, per pass. */
+  perSource: number;
+  language?: string;
+  region?: string;
+}
+
+export const DEFAULT_ANSWER_PREFERENCES: AnswerPreferences = {
+  focus: "focused",
+  media: { images: true, videos: true, articles: true, news: true },
+  licence: "reusable",
+  perSource: 8,
+};
+
 export interface SkillOutcome {
   status: Exclude<StepStatus, "queued" | "running">;
   summary: string;
@@ -110,6 +177,9 @@ export interface SkillOutcome {
   entities: Entity[];
   sources: SourceRef[];
   error?: SkillError;
+  /** Retrieval results, when the skill's job was to find something. */
+  media?: MediaItem[];
+  articles?: ArticleItem[];
 }
 
 export interface NetContext {
@@ -154,6 +224,8 @@ export interface PlannedStep {
   target: string;
   reason: string;
   status: StepStatus;
+  /** Planner-supplied context (search query, result budget, attachments). */
+  meta?: Record<string, string>;
 }
 
 export interface RiskFactor {
@@ -197,6 +269,8 @@ export type AgentEvent =
       entities: Entity[];
       sources: SourceRef[];
       error?: SkillError;
+      media?: MediaItem[];
+      articles?: ArticleItem[];
     }
   | { type: "entity:found"; entities: Entity[] }
   | { type: "risk"; risk: RiskAssessment }
@@ -243,6 +317,7 @@ export interface AttachmentInput {
   textPreview?: string;
   coordinates?: { lat: number; lon: number };
   document?: DocumentInfo;
+  perceptual?: { ahash: string; dhash: string; width: number; height: number };
 }
 
 export interface AttachmentPayload extends AttachmentInput {
@@ -258,6 +333,8 @@ export interface AgentRequest {
   language?: string;
   /** Extra attachment context already parsed in the browser (EXIF, hashes). */
   attachments?: AttachmentPayload[];
+  /** Effective answer settings for this run, so both passes plan identically. */
+  preferences?: AnswerPreferences;
 }
 
 export interface CapabilityReport {
@@ -295,4 +372,6 @@ export interface CaseTurn {
   risk?: RiskAssessment;
   answer: string;
   durationMs: number;
+  media?: MediaItem[];
+  articles?: ArticleItem[];
 }

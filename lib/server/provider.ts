@@ -25,7 +25,7 @@ export interface ProviderCandidate {
 export const PROVIDERS: ProviderCandidate[] = [
   {
     id: "sarvam",
-    label: "Sarvam AI (Indus · Sarvam-M)",
+    label: "Sarvam AI (Sarvam-M)",
     kind: "openai",
     envVar: "SARVAM_API_KEY",
     defaultModel: "sarvam-m",
@@ -93,7 +93,10 @@ export interface ResolvedModel {
 
 export async function resolveModel(): Promise<ResolvedModel | null> {
   const config = await readConfig();
-  const preferred = process.env.INDUS_MODEL_PROVIDER ?? config.preferences.provider;
+  const preferred =
+    process.env.SKOIT_MODEL_PROVIDER ??
+    process.env.INDUS_MODEL_PROVIDER ??
+    config.preferences.provider;
   const ordered = preferred
     ? [
         ...PROVIDERS.filter((provider) => provider.id === preferred),
@@ -260,6 +263,11 @@ export const KEYED_SOURCES = [
   "SEARCH_API_KEY",
   "OPENSANCTIONS_API_KEY",
   "VIRUSTOTAL_API_KEY",
+  // Media libraries: without these the console still searches the keyless
+  // Commons / Openverse / NASA / Internet Archive sources.
+  "PEXELS_API_KEY",
+  "PIXABAY_API_KEY",
+  "UNSPLASH_ACCESS_KEY",
 ];
 
 export async function sourceKeyReport() {

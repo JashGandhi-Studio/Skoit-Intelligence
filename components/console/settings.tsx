@@ -1,13 +1,28 @@
 "use client";
 
-import { Cpu, KeyRound, Loader2, Server, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  Cpu,
+  FileText,
+  Gauge,
+  Images,
+  KeyRound,
+  Loader2,
+  Newspaper,
+  Server,
+  ShieldCheck,
+  Trash2,
+  Video,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/field";
-import { Skeleton, Tab, TabContent, TabList, Tabs } from "@/components/ui/misc";
+import { Skeleton, Switch, Tab, TabContent, TabList, Tabs } from "@/components/ui/misc";
+import { persistPreferences } from "@/lib/client/preferences";
+import { mergePreferences } from "@/lib/preferences";
+import type { AnswerPreferences } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface KeyRow {
@@ -42,7 +57,7 @@ interface CapabilityResponse {
 }
 
 const KEY_LABELS: Record<string, string> = {
-  SARVAM_API_KEY: "Sarvam AI — powers Indus/Sarvam-M briefings",
+  SARVAM_API_KEY: "Sarvam AI — powers Sarvam-M briefings",
   OPENAI_API_KEY: "OpenAI — model-written briefings",
   ANTHROPIC_API_KEY: "Anthropic — model-written briefings",
   GOOGLE_GENERATIVE_AI_API_KEY: "Google Gemini — model-written briefings",
@@ -51,16 +66,68 @@ const KEY_LABELS: Record<string, string> = {
   SEARCH_API_KEY: "Brave Search — open-web and news queries",
   OPENSANCTIONS_API_KEY: "OpenSanctions — sanctions and PEP screening",
   VIRUSTOTAL_API_KEY: "VirusTotal — hash reputation",
+  PEXELS_API_KEY: "Pexels — free stock photos and video clips",
+  PIXABAY_API_KEY: "Pixabay — free images, video and B-roll",
+  UNSPLASH_ACCESS_KEY: "Unsplash — free photography",
 };
+
+const FOCUS_COPY: Record<
+  AnswerPreferences["focus"],
+  { label: string; blurb: string; detail: string }
+> = {
+  focused: {
+    label: "Focused",
+    blurb: "Exactly what was asked",
+    detail: "Ask for one thing, get that one thing. Nothing padded.",
+  },
+  standard: {
+    label: "Standard",
+    blurb: "Answer plus background",
+    detail: "The direct answer, then the surrounding reporting and identifiers.",
+  },
+  deep: {
+    label: "Deep",
+    blurb: "Full sweep",
+    detail: "Every relevant skill, documents included — for a real investigation.",
+  },
+};
+
+const MEDIA_TOGGLES: Array<{
+  key: KeyOfMedia;
+  label: string;
+  hint: string;
+  icon: typeof Images;
+}> = [
+  { key: "images", label: "Images", hint: "Photos, illustrations, stock", icon: Images },
+  { key: "videos", label: "Video & B-roll", hint: "Footage and clips", icon: Video },
+  {
+    key: "articles",
+    label: "Articles",
+    hint: "Writing, explainers, papers",
+    icon: FileText,
+  },
+  {
+    key: "news",
+    label: "Latest news",
+    hint: "Recent reporting, verified",
+    icon: Newspaper,
+  },
+];
+
+type KeyOfMedia = keyof AnswerPreferences["media"];
 
 export function SettingsDialog({
   children,
   onCapabilities,
+  preferences,
+  onPreferences,
   open: controlledOpen,
   onOpenChange,
 }: {
   children?: React.ReactNode;
   onCapabilities?: (capabilities: CapabilityResponse) => void;
+  preferences: AnswerPreferences;
+  onPreferences?: (preferences: AnswerPreferences) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -99,6 +166,22 @@ export function SettingsDialog({
       void load();
     }
   }, [open, capabilities, load]);
+
+  const [savingPreferences, setSavingPreferences] = useState(false);
+
+  const patchPreferences = async (patch: Partial<AnswerPreferences>) => {
+    const optimistic = mergePreferences(preferences, patch);
+    onPreferences?.(optimistic);
+    setSavingPreferences(true);
+    try {
+      const stored = await persistPreferences(optimistic);
+      onPreferences?.(stored);
+    } catch {
+      toast.error("Could not store answer settings on this machine");
+    } finally {
+      setSavingPreferences(false);
+    }
+  };
 
   const saveKeys = async (entries: Record<string, string | null>) => {
     setSaving(true);
@@ -152,12 +235,163 @@ export function SettingsDialog({
         description="Keys live in a local config file with owner-only permissions. They are never sent to the browser and never leave this machine."
         side="bottom"
       >
-        <Tabs defaultValue="keys">
+        <Tabs defaultValue="answers">
           <TabList className="mb-3.5 w-full justify-between">
+            <Tab value="answers">Answers</Tab>
             <Tab value="keys">Keys</Tab>
             <Tab value="model">Briefing model</Tab>
             <Tab value="capabilities">Capabilities</Tab>
           </TabList>
+
+          <TabContent value="answers">
+            <div className="space-y-5">
+              <section>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="flex items-center gap-2 text-[12.5px] font-medium text-foreground">
+                      <Gauge className="size-3.5 text-faint-foreground" />
+                      How much to answer
+                    </p>
+                    <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                      Depth is never compulsory. Ask for one thing and one thing comes
+                      back.
+                    </p>
+                  </div>
+                  {savingPreferences ? (
+                    <Loader2 className="size-3.5 animate-spin text-faint-foreground" />
+                  ) : null}
+                </div>
+                <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {(["focused", "standard", "deep"] as const).map((focus) => {
+                    const copy = FOCUS_COPY[focus];
+                    const active = preferences.focus === focus;
+                    return (
+                      <button
+                        key={focus}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => void patchPreferences({ focus })}
+                        className={cn(
+                          "rounded-xl border p-3 text-left transition-colors",
+                          active
+                            ? "border-primary/45 bg-primary-soft"
+                            : "border-hairline bg-surface hover:bg-surface-2",
+                        )}
+                      >
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-[12.5px] font-medium text-foreground">
+                            {copy.label}
+                          </span>
+                          {active ? (
+                            <Badge tone="primary" mono>
+                              on
+                            </Badge>
+                          ) : null}
+                        </span>
+                        <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                          {copy.blurb}
+                        </span>
+                        <span className="mt-1.5 block text-[11px] leading-relaxed text-faint-foreground">
+                          {copy.detail}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section>
+                <p className="text-[12.5px] font-medium text-foreground">
+                  What to look for
+                </p>
+                <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                  Switch a medium off and it is not fetched unless you ask for it directly
+                  — an explicit request always wins.
+                </p>
+                <ul className="mt-2.5 space-y-2">
+                  {MEDIA_TOGGLES.map(({ key, label, hint, icon: Icon }) => (
+                    <li
+                      key={key}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-hairline bg-surface px-3 py-2.5"
+                    >
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <Icon className="size-4 shrink-0 text-faint-foreground" />
+                        <div className="min-w-0">
+                          <p className="text-[12.5px] text-foreground">{label}</p>
+                          <p className="text-[11px] text-muted-foreground">{hint}</p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={preferences.media[key]}
+                        label={label}
+                        onCheckedChange={(value) =>
+                          void patchPreferences({
+                            media: { ...preferences.media, [key]: value },
+                          })
+                        }
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section>
+                <p className="text-[12.5px] font-medium text-foreground">
+                  Licences &amp; volume
+                </p>
+                <div className="mt-2.5 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-hairline bg-surface px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-[12.5px] text-foreground">Licence filter</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {preferences.licence === "reusable"
+                          ? "Only items cleared for reuse — with the licence named."
+                          : "Every item found; items without a stated licence are flagged."}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant={
+                          preferences.licence === "reusable" ? "primary" : "outline"
+                        }
+                        onClick={() => void patchPreferences({ licence: "reusable" })}
+                      >
+                        Reusable
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={preferences.licence === "any" ? "primary" : "outline"}
+                        onClick={() => void patchPreferences({ licence: "any" })}
+                      >
+                        Any
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-hairline bg-surface px-3 py-2.5">
+                    <p className="text-[12.5px] text-foreground">Results per source</p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      Applied to each image, video and news library separately.
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {[4, 8, 12, 16].map((count) => (
+                        <Button
+                          key={count}
+                          size="sm"
+                          variant={
+                            preferences.perSource === count ? "primary" : "outline"
+                          }
+                          onClick={() => void patchPreferences({ perSource: count })}
+                        >
+                          {count}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </TabContent>
 
           <TabContent value="keys">
             {keys === null ? (

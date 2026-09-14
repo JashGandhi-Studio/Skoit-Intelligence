@@ -14,6 +14,9 @@ const ALLOWED_KEYS = [
   "SEARCH_API_KEY",
   "OPENSANCTIONS_API_KEY",
   "VIRUSTOTAL_API_KEY",
+  "PEXELS_API_KEY",
+  "PIXABAY_API_KEY",
+  "UNSPLASH_ACCESS_KEY",
 ];
 
 export async function GET(): Promise<Response> {

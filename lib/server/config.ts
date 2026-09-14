@@ -1,6 +1,9 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { sanitizePreferences } from "@/lib/preferences";
+import type { AnswerPreferences } from "@/lib/types";
+import { DEFAULT_ANSWER_PREFERENCES } from "@/lib/types";
 
 /**
  * Runtime configuration store. Keys entered in the UI are persisted here with
@@ -8,7 +11,11 @@ import path from "node:path";
  * reports whether a key is present.
  */
 
-const DATA_DIR = process.env.INDUS_DATA_DIR ?? path.join(os.homedir(), ".indus");
+const LEGACY_DIR = path.join(os.homedir(), ".indus");
+const DATA_DIR =
+  process.env.SKOIT_DATA_DIR ??
+  process.env.INDUS_DATA_DIR ??
+  path.join(os.homedir(), ".skoit");
 const CONFIG_PATH = path.join(DATA_DIR, "config.json");
 
 export interface StoredConfig {
@@ -18,6 +25,8 @@ export interface StoredConfig {
     provider?: string;
     model?: string;
     endpoint?: string;
+    /** How much the console answers, and which media it may look for. */
+    answer?: AnswerPreferences;
   };
   updatedAt: number;
 }
@@ -25,11 +34,45 @@ export interface StoredConfig {
 const EMPTY: StoredConfig = { version: 1, keys: {}, preferences: {}, updatedAt: 0 };
 
 let cache: StoredConfig | null = null;
+let prepared = false;
+
+/**
+ * Carries a pre-rename data directory across the first time this version runs,
+ * so keys and cases stored under ~/.indus are not silently orphaned.
+ */
+async function prepareDataDir(): Promise<void> {
+  if (prepared) {
+    return;
+  }
+  prepared = true;
+  if (DATA_DIR === LEGACY_DIR) {
+    return;
+  }
+  try {
+    await stat(CONFIG_PATH);
+    return;
+  } catch {
+    /* new location not written yet */
+  }
+  try {
+    await stat(path.join(LEGACY_DIR, "config.json"));
+    await rename(LEGACY_DIR, DATA_DIR);
+    return;
+  } catch {
+    /* nothing to migrate */
+  }
+  try {
+    await mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
+  } catch {
+    /* created lazily on write */
+  }
+}
 
 export async function readConfig(): Promise<StoredConfig> {
   if (cache) {
     return cache;
   }
+  await prepareDataDir();
   try {
     const raw = await readFile(CONFIG_PATH, "utf8");
     const parsed = JSON.parse(raw) as StoredConfig;
@@ -41,6 +84,7 @@ export async function readConfig(): Promise<StoredConfig> {
 }
 
 export async function writeConfig(next: StoredConfig): Promise<void> {
+  await prepareDataDir();
   await mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
   const payload: StoredConfig = { ...next, updatedAt: Date.now() };
   const temp = `${CONFIG_PATH}.${process.pid}.tmp`;
@@ -133,4 +177,18 @@ export async function keyReport(knownKeys: string[]): Promise<
   });
 }
 
+/** Effective answer settings: defaults folded together with whatever was stored. */
+export async function readAnswerPreferences(): Promise<AnswerPreferences> {
+  const config = await readConfig();
+  return sanitizePreferences({
+    ...DEFAULT_ANSWER_PREFERENCES,
+    ...(config.preferences.answer ?? {}),
+    media: {
+      ...DEFAULT_ANSWER_PREFERENCES.media,
+      ...(config.preferences.answer?.media ?? {}),
+    },
+  });
+}
+
 export const dataDir = DATA_DIR;
+export { LEGACY_DIR };

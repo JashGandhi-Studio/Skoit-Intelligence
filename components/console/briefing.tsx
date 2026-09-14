@@ -70,7 +70,7 @@ export function Briefing({ turn, caseTitle }: { turn: TurnView; caseTitle: strin
         </div>
       </header>
 
-      <div className="prose-indus prose prose-sm max-w-none px-4 py-3.5 dark:prose-invert">
+      <div className="prose-skoit prose prose-sm max-w-none px-4 py-3.5 dark:prose-invert">
         <Markdown
           remarkPlugins={[remarkGfm]}
           components={{

@@ -20,6 +20,7 @@ import { CaseSidebar } from "@/components/console/case-sidebar";
 import { Composer, type ComposerSubmission } from "@/components/console/composer";
 import { IntelPanel } from "@/components/console/intel-panel";
 import { PlanCard } from "@/components/console/plan-card";
+import { ResultsGallery } from "@/components/console/results-gallery";
 import { SettingsDialog } from "@/components/console/settings";
 import { StepCard } from "@/components/console/step-card";
 import { useTheme } from "@/components/theme-provider";
@@ -37,10 +38,18 @@ import {
   toCaseTurn,
   useCases,
 } from "@/lib/client/cases";
+import { fetchStoredPreferences, loadLocalPreferences } from "@/lib/client/preferences";
 import { runClientPass } from "@/lib/client/runner";
 import { getSkill, manifest } from "@/lib/skills";
 import { detectTargets } from "@/lib/skills/identify";
-import type { AgentEvent, AgentRequest, CaseFile, CaseTurn } from "@/lib/types";
+import type {
+  AgentEvent,
+  AgentRequest,
+  AnswerPreferences,
+  CaseFile,
+  CaseTurn,
+} from "@/lib/types";
+import { DEFAULT_ANSWER_PREFERENCES } from "@/lib/types";
 import { cn, formatDuration } from "@/lib/utils";
 
 const STARTERS = [
@@ -104,6 +113,8 @@ function TurnViewFromSaved(turn: CaseTurn): TurnView {
       attributes: item.attributes,
     })),
     sources: turn.sources,
+    media: turn.media ?? [],
+    articles: turn.articles ?? [],
     risk: turn.risk,
     answer: turn.answer,
     answerMode: turn.mode,
@@ -140,6 +151,9 @@ export function Console() {
   const [mobileIntel, setMobileIntel] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [preferences, setPreferences] = useState<AnswerPreferences>(
+    DEFAULT_ANSWER_PREFERENCES,
+  );
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -150,6 +164,15 @@ export function Console() {
 
   // Hydrate the saved turns when a *different* case is opened. Keyed on the id so
   // that saving mid-run (which replaces the case object) never clears the live view.
+  useEffect(() => {
+    setPreferences(loadLocalPreferences());
+    void fetchStoredPreferences().then((stored) => {
+      if (stored) {
+        setPreferences(stored);
+      }
+    });
+  }, []);
+
   useEffect(() => {
     if (!active) {
       if (hydratedCaseRef.current !== null) {
@@ -243,6 +266,8 @@ export function Console() {
         evidence: [],
         entities: [],
         sources: [],
+        media: [],
+        articles: [],
         notices: [],
       };
 
@@ -262,6 +287,7 @@ export function Console() {
 
       const request: AgentRequest = {
         message: question,
+        preferences,
         skillIds: submission.skillIds,
         attachments: submission.attachments?.map(
           ({ previewUrl: _previewUrl, ...rest }) => rest,
@@ -288,7 +314,7 @@ export function Console() {
           signal: controller.signal,
         });
 
-        const headerModel = response.headers.get("x-indus-model");
+        const headerModel = response.headers.get("x-skoit-model");
         if (headerModel && headerModel !== "none") {
           setModelLabel(headerModel);
         }
@@ -464,7 +490,7 @@ export function Console() {
         persistTurn(caseFile.id, finished);
       }
     },
-    [active, createCase, patchTurn, persistTurn, skills, turns, updateCase],
+    [active, createCase, patchTurn, persistTurn, skills, turns, updateCase, preferences],
   );
 
   const stop = useCallback(() => {
@@ -668,6 +694,8 @@ export function Console() {
             <SettingsDialog
               open={settingsOpen}
               onOpenChange={setSettingsOpen}
+              preferences={preferences}
+              onPreferences={setPreferences}
               onCapabilities={(capabilities) => setEgress(capabilities.egress)}
             >
               <Button variant="ghost" size="icon" aria-label="Settings">
@@ -848,6 +876,10 @@ export function Console() {
                         ) : null}
                       </div>
                     ) : null}
+
+                    {(turn.media.length > 0 || turn.articles.length > 0) && (
+                      <ResultsGallery media={turn.media} articles={turn.articles} />
+                    )}
 
                     {turn.answer ? (
                       <Briefing turn={turn} caseTitle={active?.title ?? "case"} />

@@ -78,6 +78,8 @@ export async function runClientPass(
   const entities: AnalysisBundle["entities"] = [];
   const sources: AnalysisBundle["sources"] = [];
   const outcomes: AnalysisBundle["outcomes"] = [];
+  const media: NonNullable<AnalysisBundle["media"]> = [];
+  const articles: NonNullable<AnalysisBundle["articles"]> = [];
 
   for (const step of steps) {
     if (signal.aborted) {
@@ -112,10 +114,16 @@ export async function runClientPass(
           value: step.target,
           raw: step.target,
           confidence: "confirmed",
-          meta:
-            request.attachments?.length && skill.id === "attachment-review"
-              ? { attachments: JSON.stringify(request.attachments) }
-              : undefined,
+          meta: (() => {
+            const meta: Record<string, string> = { ...(step.meta ?? {}) };
+            if (
+              request.attachments?.length &&
+              (skill.id === "attachment-review" || skill.id === "image-provenance")
+            ) {
+              meta.attachments = JSON.stringify(request.attachments);
+            }
+            return Object.keys(meta).length > 0 ? meta : undefined;
+          })(),
         },
         ctx,
       );
@@ -136,6 +144,16 @@ export async function runClientPass(
     localStep.status = outcome.status;
     evidence.push(...outcome.evidence);
     entities.push(...outcome.entities);
+    for (const item of outcome.media ?? []) {
+      if (!media.some((existing) => existing.url === item.url)) {
+        media.push(item);
+      }
+    }
+    for (const item of outcome.articles ?? []) {
+      if (!articles.some((existing) => existing.url === item.url)) {
+        articles.push(item);
+      }
+    }
     for (const item of outcome.sources) {
       if (!sources.some((existing) => existing.id === item.id)) {
         sources.push(item);
@@ -154,6 +172,8 @@ export async function runClientPass(
       entities: outcome.entities,
       sources: outcome.sources,
       error: outcome.error,
+      media: outcome.media,
+      articles: outcome.articles,
     });
   }
 
@@ -165,6 +185,8 @@ export async function runClientPass(
     entities,
     sources,
     rationale: plan.rationale,
+    media,
+    articles,
   };
   const risk = assessRisk(bundle);
   onEvent({ type: "risk", risk });

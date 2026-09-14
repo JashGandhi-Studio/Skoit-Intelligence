@@ -1,7 +1,7 @@
 import type { NetContext, SkillError, SourceRef } from "@/lib/types";
 
 export const USER_AGENT =
-  "INDUS-OSINT-Analyst/1.0 (+public-source research console; contact: analyst@localhost)";
+  "SkOiT-OSINT-Analyst/1.0 (+public-source research console; contact: analyst@localhost)";
 
 const DEFAULT_TIMEOUT = 8000;
 

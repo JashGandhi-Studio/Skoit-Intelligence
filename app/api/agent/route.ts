@@ -5,6 +5,8 @@ import {
   buildModelPrompt,
   SYNTHESIS_INSTRUCTIONS,
 } from "@/lib/agent/synthesize";
+import { sanitizePreferences } from "@/lib/preferences";
+import { readAnswerPreferences } from "@/lib/server/config";
 import { generateBriefing, resolveModel } from "@/lib/server/provider";
 import type { AgentEvent, AgentRequest, AttachmentPayload, Evidence } from "@/lib/types";
 
@@ -112,6 +114,7 @@ function parseBody(raw: unknown): AgentRequest {
       : undefined,
     language: typeof body.language === "string" ? body.language.slice(0, 12) : undefined,
     attachments: parseAttachments(body.attachments),
+    preferences: body.preferences ? sanitizePreferences(body.preferences) : undefined,
   };
 }
 
@@ -126,6 +129,10 @@ export async function POST(request: Request): Promise<Response> {
   if (!parsed.message.trim()) {
     return Response.json({ error: "A question or target is required." }, { status: 400 });
   }
+
+  // The browser pass and the server pass must plan from the same settings: a
+  // request without explicit preferences inherits what Settings stored.
+  parsed.preferences = parsed.preferences ?? (await readAnswerPreferences());
 
   const encoder = new TextEncoder();
   const abort = new AbortController();
@@ -198,8 +205,8 @@ export async function POST(request: Request): Promise<Response> {
     headers: {
       "content-type": "application/x-ndjson; charset=utf-8",
       "cache-control": "no-store, no-transform",
-      "x-indus-egress": String(egress),
-      "x-indus-model": resolved?.label ?? "none",
+      "x-skoit-egress": String(egress),
+      "x-skoit-model": resolved?.label ?? "none",
     },
   });
 }

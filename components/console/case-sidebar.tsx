@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { IndusWordmark } from "@/components/brand";
+import { SkoitWordmark } from "@/components/brand";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/field";
@@ -67,7 +67,7 @@ export function CaseSidebar({
   return (
     <aside className="flex h-full min-h-0 flex-col border-r border-hairline bg-surface">
       <header className="flex items-center justify-between px-3.5 py-3.5">
-        <IndusWordmark />
+        <SkoitWordmark />
         <div className="flex items-center gap-1">
           <Tip label="Console settings, keys and capabilities">
             <Button
@@ -148,7 +148,7 @@ export function CaseSidebar({
                 onImport(parsed);
                 toast.success(`Imported “${parsed.title}”`);
               } catch {
-                toast.error("That file is not a valid INDUS case export");
+                toast.error("That file is not a valid SkOiT case export");
               } finally {
                 if (importRef.current) {
                   importRef.current.value = "";

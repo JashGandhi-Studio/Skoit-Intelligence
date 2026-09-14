@@ -20,7 +20,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("dark");
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("indus-theme") as Theme | null;
+    const stored = (window.localStorage.getItem("skoit-theme") ??
+      window.localStorage.getItem("indus-theme")) as Theme | null;
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     setTheme(stored ?? (prefersDark ? "dark" : "light"));
   }, []);
@@ -29,7 +30,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
     root.style.colorScheme = theme;
-    window.localStorage.setItem("indus-theme", theme);
+    window.localStorage.setItem("skoit-theme", theme);
   }, [theme]);
 
   const toggle = useCallback(() => {

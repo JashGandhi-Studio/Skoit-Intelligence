@@ -1,8 +1,8 @@
 {
-  "name": "indus-osint",
+  "name": "skoit",
   "version": "1.0.0",
   "private": true,
-  "description": "INDUS \u2014 an OSINT analyst console with an Indus/Sarvam-style interface, mobile-first design and saved case files.",
+  "description": "SkOiT \u2014 an OSINT analyst console that finds images, video, articles and news from free sources, answers at the depth you ask for, and saves every case locally.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

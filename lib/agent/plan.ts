@@ -7,11 +7,101 @@ import {
 } from "@/lib/skills/identify";
 import type {
   AgentRequest,
+  AnswerPreferences,
   DetectedTarget,
   PlannedStep,
   SkillDefinition,
   TargetKind,
 } from "@/lib/types";
+import { DEFAULT_ANSWER_PREFERENCES } from "@/lib/types";
+
+export type RetrievalKind = "image" | "video" | "news" | "article";
+
+export interface AnswerIntent {
+  /** What the analyst actually asked to be found. */
+  kinds: RetrievalKind[];
+  /** The cleaned subject, with the request phrasing stripped out. */
+  topic: string;
+  /** True when the request asked for a specific medium rather than only a topic. */
+  explicit: boolean;
+  /** True when the analyst explicitly asked for a video (used for stock footage). */
+  wantsVideo: boolean;
+}
+
+const RETRIEVAL_PATTERNS: Array<{ kind: RetrievalKind; pattern: RegExp }> = [
+  {
+    kind: "video",
+    pattern:
+      /\b(videos?|clips?|footage|b[\s-]?roll|broll|reels?|timelapse|drone shots?|animation|stock video|video chahiye|video dikhao)\b/i,
+  },
+  {
+    kind: "image",
+    pattern:
+      /\b(images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|thumbnails?|banners?|logos?|visuals?|stock photos?|stock images?|image chahiye|photo chahiye|dikhao|dikha do|screenshot)\b/i,
+  },
+  {
+    kind: "news",
+    pattern:
+      /\b(news|latest|headlines?|breaking|khabar|samachar|current affairs|what happened|aaj ka)\b/i,
+  },
+  {
+    kind: "article",
+    pattern:
+      /\b(articles?|blogs?|posts?|essays?|papers?|stud(y|ies)|research|reports?|tutorials?|guides?|documentation|whitepapers?|read (about|up on)|explained)\b/i,
+  },
+];
+
+/** Words that carry no subject once the request phrasing is removed. */
+const REQUEST_NOISE =
+  /\b(please|pls|kindly|hey|hi|hello|ok|okay|so|now|then|can you|could you|would you|i want|i need|i would like|give me|gimme|show me|find me|get me|fetch me|search for|search|look for|look up|pull up|download|free|royalty[\s-]?free|licen[cs]e[\s-]?free|unlimited|no copyright|copyright free|b[\s-]?roll|broll|stock|clips?|footage|videos?|images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|articles?|blogs?|news|latest|headlines?|breaking|about|regarding|related to|for|of|on|some|any|the|a|an|chahiye|dikhao|dikha|do|de|dedo|la|bhej)\b/gi;
+
+export function cleanTopic(message: string): string {
+  const stripped = message
+    .replace(REQUEST_NOISE, " ")
+    .replace(/[?!.]+$/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const cleaned = stripped.replace(/^[\s,;:-]+|[\s,;:-]+$/g, "");
+  // If stripping removed the subject entirely, fall back to the raw ask.
+  return cleaned.length >= 2 ? cleaned.slice(0, 180) : message.trim().slice(0, 180);
+}
+
+export function detectIntent(
+  message: string,
+  preferences: AnswerPreferences,
+  hasAttachments: boolean,
+): AnswerIntent {
+  const kinds: RetrievalKind[] = [];
+  let explicit = false;
+
+  for (const { kind, pattern } of RETRIEVAL_PATTERNS) {
+    if (!pattern.test(message)) {
+      continue;
+    }
+    const enabled =
+      kind === "image"
+        ? preferences.media.images
+        : kind === "video"
+          ? preferences.media.videos
+          : kind === "news"
+            ? preferences.media.news
+            : preferences.media.articles;
+    // An explicit ask always wins over a toggle — capability is never silently removed.
+    if (enabled || /\b(news|images?|photos?|videos?|articles?)\b/i.test(message)) {
+      kinds.push(kind);
+      explicit = true;
+    }
+  }
+
+  // Nudging the depth: "latest news" implies recency, an article ask implies reading.
+  const topic = cleanTopic(message);
+  const wantsVideo = kinds.includes("video");
+  if (hasAttachments && !kinds.includes("image")) {
+    kinds.push("image");
+  }
+
+  return { kinds, topic, explicit, wantsVideo };
+}
 
 const TYPO_KEYWORDS =
   /(typo|lookalike|look-alike|phish|spoof|fake|impersonat|clone|squat|brand)/i;
@@ -19,6 +109,23 @@ const SEARCH_KEYWORDS =
   /(news|search|google|find|mention|press|article|reported|coverage)/i;
 const FULL_SWEEP =
   /(full|deep|everything|all skills|complete|exhaustive|sweep everything)/i;
+
+const RETRIEVAL_SKILL_IDS = new Set([
+  "image-search",
+  "video-search",
+  "news-search",
+  "image-provenance",
+]);
+
+const RETRIEVAL_SKILL_FOR: Record<RetrievalKind, string> = {
+  image: "image-search",
+  video: "video-search",
+  news: "news-search",
+  article: "news-search",
+};
+
+const PROVENANCE_KEYWORDS =
+  /(provenance|reverse image|where is this|find this image|source of (this|the) (image|photo|picture)|original (image|photo|picture)|image origin|kahan se|kaun si photo|phota kahan)/i;
 
 const BASE_PLAN: Partial<Record<TargetKind, string[]>> = {
   domain: ["dns-intel", "domain-registration", "certificate-transparency", "dns-posture"],
@@ -82,6 +189,7 @@ function stepFor(
     target: target.value,
     reason: REASONS[skill.id] ?? skill.description,
     status: "queued",
+    meta: target.meta,
   };
 }
 
@@ -127,7 +235,9 @@ export interface Plan {
   targets: DetectedTarget[];
   steps: PlannedStep[];
   rationale: string;
-  mode: "deep" | "focused";
+  mode: "deep" | "standard" | "focused";
+  /** What the analyst asked to be found, for the plan card. */
+  intent: AnswerIntent;
 }
 
 export function buildPlan(request: AgentRequest): Plan {
@@ -137,9 +247,13 @@ export function buildPlan(request: AgentRequest): Plan {
   const extras = textDerivedTargets(message);
   const targets = [...detected, ...extras];
 
-  const wantsDeep = FULL_SWEEP.test(message);
+  const preferences = request.preferences ?? DEFAULT_ANSWER_PREFERENCES;
+  const intent = detectIntent(message, preferences, attachments.length > 0);
+  const focus = preferences.focus;
+  const wantsDeep = FULL_SWEEP.test(message) || focus === "deep";
   const wantsTyposquat = TYPO_KEYWORDS.test(message);
   const wantsSearch = SEARCH_KEYWORDS.test(message);
+  const hardTargets = targets.filter((target) => target.kind !== "text");
 
   const requested = new Set(request.skillIds ?? []);
   const steps: PlannedStep[] = [];
@@ -162,6 +276,78 @@ export function buildPlan(request: AgentRequest): Plan {
       }
     }
   };
+
+  const retrievalTarget = (
+    topic: string,
+    extra: Record<string, string> = {},
+  ): DetectedTarget => ({
+    kind: "text",
+    value: topic,
+    raw: message.slice(0, 500),
+    confidence: "confirmed",
+    meta: {
+      query: topic,
+      perSource: String(preferences.perSource ?? 8),
+      licence: preferences.licence ?? "reusable",
+      timespan: focus === "deep" ? "2w" : "3d",
+      ...(preferences.language ? { language: preferences.language } : {}),
+      ...(preferences.region ? { region: preferences.region } : {}),
+      ...extra,
+    },
+  });
+
+  const addRetrieval = (kind: RetrievalKind, topic = intent.topic) => {
+    const skill = getSkill(RETRIEVAL_SKILL_FOR[kind]);
+    if (skill) {
+      addStep(skill, retrievalTarget(topic));
+    }
+  };
+
+  const retrievalOnly = intent.kinds.length > 0 && hardTargets.length === 0;
+
+  if (retrievalOnly) {
+    // The analyst asked for a thing to be found, not for a dossier. Answer that.
+    for (const kind of intent.kinds) {
+      addRetrieval(kind);
+    }
+    if (attachments.length > 0) {
+      const review = getSkill("attachment-review");
+      if (review) {
+        addStep(review, {
+          kind: "text",
+          value: attachments.map((item) => item.name).join(", "),
+          raw: message || "attachment",
+          confidence: "confirmed",
+        });
+      }
+      const provenance = getSkill("image-provenance");
+      if (provenance) {
+        addStep(provenance, retrievalTarget(intent.topic));
+      }
+    }
+    if (focus !== "focused") {
+      const context = getSkill("text-intelligence");
+      if (context) {
+        addStep(context, targetLike(message));
+      }
+    }
+    const mode: Plan["mode"] = wantsDeep
+      ? "deep"
+      : focus === "standard"
+        ? "standard"
+        : "focused";
+    return {
+      targets,
+      steps,
+      rationale: `Asked for ${intent.kinds.join(" + ")} on “${intent.topic}” — running ${steps.length} retrieval skill(s) and nothing else. ${
+        focus === "focused"
+          ? "Focused mode keeps the answer to exactly this."
+          : "Wider modes add background, never noise."
+      }`,
+      mode,
+      intent,
+    };
+  }
 
   for (const target of targets) {
     addSkillChain(target.kind, target);
@@ -207,6 +393,10 @@ export function buildPlan(request: AgentRequest): Plan {
 
   // Keyword-driven additions: the analyst asked for something specific.
   for (const skill of skillsMatchingText(message)) {
+    if (RETRIEVAL_SKILL_IDS.has(skill.id)) {
+      // Retrieval skills are planned from detected intent, with a cleaned query.
+      continue;
+    }
     if (skill.id === "typosquat-watch" && !wantsTyposquat) {
       continue;
     }
@@ -241,6 +431,20 @@ export function buildPlan(request: AgentRequest): Plan {
     }
   }
 
+  // Media and news asks alongside a hard target: the analyst wants both.
+  for (const kind of intent.kinds) {
+    addRetrieval(kind, hardTargets[0]?.value ?? intent.topic);
+  }
+  if (
+    attachments.length > 0 &&
+    (PROVENANCE_KEYWORDS.test(message) || intent.kinds.includes("image"))
+  ) {
+    const provenance = getSkill("image-provenance");
+    if (provenance) {
+      addStep(provenance, retrievalTarget(intent.topic));
+    }
+  }
+
   if (wantsSearch && !request.skillIds?.length) {
     const search = getSkill("web-search");
     if (search) {
@@ -258,6 +462,13 @@ export function buildPlan(request: AgentRequest): Plan {
         confidence: "confirmed",
         meta: { attachments: JSON.stringify(attachments) },
       });
+    }
+  }
+
+  if (wantsDeep && hardTargets.length > 0) {
+    const reporting = getSkill("news-search");
+    if (reporting) {
+      addStep(reporting, retrievalTarget(hardTargets[0].value));
     }
   }
 
@@ -291,12 +502,23 @@ export function buildPlan(request: AgentRequest): Plan {
         steps: filtered,
         rationale: buildRationale(targets, filtered, "focused"),
         mode: "focused",
+        intent,
       };
     }
   }
 
-  const mode: Plan["mode"] = wantsDeep ? "deep" : "focused";
-  return { targets, steps, rationale: buildRationale(targets, steps, mode), mode };
+  const mode: Plan["mode"] = wantsDeep
+    ? "deep"
+    : focus === "standard"
+      ? "standard"
+      : "focused";
+  return {
+    targets,
+    steps,
+    rationale: buildRationale(targets, steps, mode),
+    mode,
+    intent,
+  };
 }
 
 function targetLike(value: string): DetectedTarget {
@@ -319,9 +541,11 @@ function buildRationale(
   const kinds = Array.from(new Set(targets.map((target) => targetLabel(target)))).join(
     ", ",
   );
-  return `Detected ${targets.length} identifier(s): ${kinds}. Selected ${steps.length} skill(s) — ${
+  const width =
     mode === "deep"
-      ? "full sweep including batch and document checks"
-      : "a focused pass on the identifier types present"
-  }. Sources that need a key are still listed; they report themselves as unavailable instead of guessing.`;
+      ? "full sweep including batch, reporting and document checks"
+      : mode === "standard"
+        ? "the identifier chain plus background reporting"
+        : "a focused pass on just what was asked";
+  return `Detected ${targets.length} identifier(s): ${kinds}. Selected ${steps.length} skill(s) — ${width}. Sources that need a key are still listed; they report themselves as unavailable instead of guessing.`;
 }

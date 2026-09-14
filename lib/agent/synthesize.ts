@@ -1,6 +1,8 @@
 import type {
+  ArticleItem,
   Entity,
   Evidence,
+  MediaItem,
   PlannedStep,
   RiskAssessment,
   SkillOutcome,
@@ -16,6 +18,9 @@ export interface AnalysisBundle {
   entities: Entity[];
   sources: SourceRef[];
   rationale: string;
+  /** Retrieval results: images, footage and articles the skills brought back. */
+  media?: MediaItem[];
+  articles?: ArticleItem[];
 }
 
 export function assessRisk(bundle: AnalysisBundle): RiskAssessment {
@@ -179,6 +184,56 @@ export function deterministicBriefing(
     }
   }
 
+  const media = bundle.media ?? [];
+  const articles = bundle.articles ?? [];
+  if (media.length > 0) {
+    const images = media.filter((item) => item.kind === "image");
+    const clips = media.filter((item) => item.kind === "video");
+    lines.push("", "### Files found (direct links, licences stated)");
+    if (images.length > 0) {
+      lines.push(
+        `- **${images.length} image(s)** — ${images
+          .slice(0, 3)
+          .map(
+            (item) =>
+              `${item.title} (${item.source}${item.licence ? `, ${item.licence}` : ""})`,
+          )
+          .join("; ")}`,
+      );
+    }
+    if (clips.length > 0) {
+      lines.push(
+        `- **${clips.length} clip(s)** — ${clips
+          .slice(0, 3)
+          .map((item) => `${item.title} (${item.source})`)
+          .join("; ")}`,
+      );
+    }
+    const unlicensed = media.filter((item) => !item.licence).length;
+    if (unlicensed > 0) {
+      lines.push(
+        `- ${unlicensed} item(s) carry no stated licence — check the source page before publishing.`,
+      );
+    }
+  }
+  if (articles.length > 0) {
+    const domains = new Set(articles.map((item) => item.domain));
+    const corroborated = articles.filter((item) => (item.corroborations ?? 0) > 0);
+    lines.push("", "### Reporting found");
+    lines.push(
+      `- **${articles.length} article(s)** across ${domains.size} domain(s); ${corroborated.length} item(s) corroborated by a second independent domain.`,
+    );
+    for (const item of articles.slice(0, 6)) {
+      lines.push(
+        `- [${item.title}](${item.url}) — ${item.domain}${
+          item.publishedAt
+            ? ` · ${new Date(item.publishedAt).toISOString().slice(0, 10)}`
+            : ""
+        }${item.corroborations ? ` · +${item.corroborations} independent domain(s)` : " · single source"}`,
+      );
+    }
+  }
+
   if (bundle.entities.length > 0) {
     const grouped = new Map<string, string[]>();
     for (const entity of bundle.entities) {
@@ -246,6 +301,32 @@ export function deterministicBriefing(
   return lines.join("\n");
 }
 
+function retrievalBlock(bundle: AnalysisBundle): string {
+  const media = bundle.media ?? [];
+  const articles = bundle.articles ?? [];
+  if (media.length === 0 && articles.length === 0) {
+    return "RETRIEVAL: nothing was requested from the media or news sources.";
+  }
+  const lines: string[] = [];
+  if (media.length > 0) {
+    lines.push(`FILES (${media.length}):`);
+    for (const item of media.slice(0, 12)) {
+      lines.push(
+        `- [${item.kind}] ${item.title} | ${item.source} | licence: ${item.licence ?? "not stated"} | author: ${item.author ?? "unknown"} | ${item.url}`,
+      );
+    }
+  }
+  if (articles.length > 0) {
+    lines.push(`ARTICLES (${articles.length}):`);
+    for (const item of articles.slice(0, 14)) {
+      lines.push(
+        `- ${item.title} | ${item.domain} | ${item.publishedAt ? new Date(item.publishedAt).toISOString().slice(0, 10) : "undated"} | corroborations: ${item.corroborations ?? 0}${item.syndicated ? " | syndicated copy" : ""} | ${item.url}`,
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
 export function buildModelPrompt(bundle: AnalysisBundle, risk: RiskAssessment): string {
   const citations = citationIndex(bundle);
   const sourceList = bundle.sources
@@ -300,7 +381,10 @@ SOURCE COVERAGE
 ${coverage || "- none"}
 
 CITABLE SOURCES
-${sourceList || "- none"}`;
+${sourceList || "- none"}
+
+RETRIEVAL RESULTS (files and reporting actually returned by the sources)
+${retrievalBlock(bundle)}`;
 }
 
 export const SYNTHESIS_INSTRUCTIONS = `You are the analyst-writing layer of an OSINT console. You do not have tools,
@@ -324,4 +408,7 @@ Output markdown with these sections, in this order:
 ### Coverage & gaps        (what ran, what did not, what it means for confidence)
 ### Recommended next steps (concrete, lawful, each tied to a gap)
 
-Length: 200-420 words. Precision over completeness.`;
+Match the length of the answer to the question that was asked: when the analyst only wanted an image, a
+clip or a news item, answer that in a few lines instead of restating the whole evidence table. When
+retrieval results are present, name what was found, where it came from and its licence, and mark
+single-source reporting as unconfirmed.`;

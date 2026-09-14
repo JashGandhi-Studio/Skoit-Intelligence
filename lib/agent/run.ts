@@ -3,8 +3,10 @@ import { getSkill } from "@/lib/skills";
 import type {
   AgentEvent,
   AgentRequest,
+  ArticleItem,
   Entity,
   Evidence,
+  MediaItem,
   NetContext,
   PlannedStep,
   SkillOutcome,
@@ -62,9 +64,22 @@ export async function runAnalysis(options: RunOptions): Promise<{
   const entities: Entity[] = [];
   const sources: SourceRef[] = [];
 
+  const media: MediaItem[] = [];
+  const articles: ArticleItem[] = [];
+
   const collect = (outcome: SkillOutcome) => {
     for (const item of outcome.evidence) {
       evidence.push(item);
+    }
+    for (const item of outcome.media ?? []) {
+      if (!media.some((existing) => existing.url === item.url)) {
+        media.push(item);
+      }
+    }
+    for (const item of outcome.articles ?? []) {
+      if (!articles.some((existing) => existing.url === item.url)) {
+        articles.push(item);
+      }
     }
     for (const item of outcome.entities) {
       entities.push(item);
@@ -111,10 +126,16 @@ export async function runAnalysis(options: RunOptions): Promise<{
           value: step.target,
           raw: step.target,
           confidence: "confirmed",
-          meta:
-            request.attachments?.length && skill.id === "attachment-review"
-              ? { attachments: JSON.stringify(request.attachments) }
-              : undefined,
+          meta: (() => {
+            const meta: Record<string, string> = { ...(step.meta ?? {}) };
+            if (
+              request.attachments?.length &&
+              (skill.id === "attachment-review" || skill.id === "image-provenance")
+            ) {
+              meta.attachments = JSON.stringify(request.attachments);
+            }
+            return Object.keys(meta).length > 0 ? meta : undefined;
+          })(),
         },
         {
           ...ctx,
@@ -161,6 +182,8 @@ export async function runAnalysis(options: RunOptions): Promise<{
       entities: outcome.entities,
       sources: outcome.sources,
       error: outcome.error,
+      media: outcome.media,
+      articles: outcome.articles,
     });
 
     if (outcome.entities.length > 0) {
@@ -184,6 +207,8 @@ export async function runAnalysis(options: RunOptions): Promise<{
     evidence,
     entities,
     sources,
+    media,
+    articles,
     rationale: plan.rationale,
   };
 

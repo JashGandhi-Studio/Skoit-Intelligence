@@ -5,9 +5,11 @@ import type { AnalysisBundle } from "@/lib/agent/synthesize";
 import { deterministicBriefing } from "@/lib/agent/synthesize";
 import type {
   AgentEvent,
+  ArticleItem,
   CaseFile,
   CaseTurn,
   Evidence,
+  MediaItem,
   PlannedStep,
   RiskAssessment,
   SkillOutcome,
@@ -71,13 +73,16 @@ export type TurnView = {
   answer?: string;
   answerMode?: "model" | "analyst";
   model?: string;
+  media: MediaItem[];
+  articles: ArticleItem[];
   notices: Array<{ level: string; message: string }>;
   stats?: { steps: number; evidence: number; entities: number; sources: number };
   clientPassRan?: boolean;
 };
 
-const STORAGE_KEY = "indus.cases.v1";
-const ACTIVE_KEY = "indus.active-case";
+const STORAGE_KEY = "skoit.cases.v1";
+const LEGACY_STORAGE_KEY = "indus.cases.v1";
+const ACTIVE_KEY = "skoit.active-case";
 
 /** Applies a streamed agent event to the turn, without ever merging in data that was not sent. */
 export function applyEvent(turn: TurnView, event: AgentEvent): TurnView {
@@ -153,12 +158,22 @@ export function applyEvent(turn: TurnView, event: AgentEvent): TurnView {
       const sourceAdditions = (event.sources ?? []).filter(
         (item) => !knownSources.has(item.id),
       );
+      const knownMedia = new Set(turn.media.map((item) => item.url));
+      const mediaAdditions = (event.media ?? []).filter(
+        (item) => !knownMedia.has(item.url),
+      );
+      const knownArticles = new Set(turn.articles.map((item) => item.url));
+      const articleAdditions = (event.articles ?? []).filter(
+        (item) => !knownArticles.has(item.url),
+      );
       return {
         ...turn,
         steps,
         evidence: [...turn.evidence, ...additions],
         entities: [...turn.entities, ...entityAdditions],
         sources: [...turn.sources, ...sourceAdditions],
+        media: [...turn.media, ...mediaAdditions],
+        articles: [...turn.articles, ...articleAdditions],
       };
     }
     case "risk":
@@ -258,6 +273,8 @@ export function toCaseTurn(turn: TurnView): CaseTurn {
       kind: item.kind as CaseTurn["sources"][number]["kind"],
       accessedAt: item.accessedAt,
     })),
+    media: turn.media,
+    articles: turn.articles,
     risk: turn.risk
       ? {
           score: turn.risk.score,
@@ -279,8 +296,14 @@ export function useCases() {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const raw =
+        window.localStorage.getItem(STORAGE_KEY) ??
+        window.localStorage.getItem(LEGACY_STORAGE_KEY);
       const stored = raw ? (JSON.parse(raw) as CaseFile[]) : [];
+      if (stored.length > 0) {
+        // Carry cases across the rename so nothing a user saved is orphaned.
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+      }
       setCases(stored);
       const active = window.localStorage.getItem(ACTIVE_KEY);
       setActiveId(
@@ -499,6 +522,8 @@ export function bundleFromTurn(turn: TurnView): AnalysisBundle {
       kind: item.kind as CaseTurn["sources"][number]["kind"],
       accessedAt: item.accessedAt,
     })),
+    media: turn.media,
+    articles: turn.articles,
   };
 }
 
@@ -523,6 +548,30 @@ export function caseToMarkdown(caseFile: CaseFile): string {
       "",
     );
     lines.push(turn.answer, "");
+    if (turn.media && turn.media.length > 0) {
+      lines.push("### Files found", "");
+      for (const item of turn.media) {
+        lines.push(
+          `- [${item.title}](${item.url}) — ${item.kind} · ${item.source}${
+            item.licence ? ` · ${item.licence}` : " · licence not stated"
+          }${item.author ? ` · ${item.author}` : ""}`,
+        );
+      }
+      lines.push("");
+    }
+    if (turn.articles && turn.articles.length > 0) {
+      lines.push("### Reporting found", "");
+      for (const item of turn.articles) {
+        lines.push(
+          `- [${item.title}](${item.url}) — ${item.domain}${
+            item.publishedAt
+              ? ` · ${new Date(item.publishedAt).toISOString().slice(0, 10)}`
+              : ""
+          }${item.corroborations ? ` · +${item.corroborations} independent domain(s)` : " · single source"}`,
+        );
+      }
+      lines.push("");
+    }
     const noteworthy = turn.evidence.filter(
       (item) => item.severity && item.severity !== "info",
     );
@@ -537,7 +586,7 @@ export function caseToMarkdown(caseFile: CaseFile): string {
   lines.push(
     "---",
     "",
-    "Collected with INDUS. Every line above traces to a cited public source; re-verify before publication.",
+    "Collected with SkOiT. Every line above traces to a cited public source; re-verify before publication.",
   );
   return lines.join("\n");
 }

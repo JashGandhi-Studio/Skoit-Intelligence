@@ -5,6 +5,7 @@ import { indiaSkills } from "./india";
 import { ipSkills } from "./ip";
 import { knowledgeSkills } from "./knowledge";
 import { mediaSkills } from "./media";
+import { retrievalSkills } from "./retrieval";
 
 export const allSkills: SkillDefinition[] = [
   ...domainSkills,
@@ -12,6 +13,7 @@ export const allSkills: SkillDefinition[] = [
   ...identitySkills,
   ...indiaSkills,
   ...mediaSkills,
+  ...retrievalSkills,
   ...knowledgeSkills,
 ];
 
