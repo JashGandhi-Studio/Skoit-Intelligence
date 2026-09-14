@@ -18,10 +18,35 @@ interface InstallPromptEvent extends Event {
 
 export function PwaProvider() {
   useEffect(() => {
-    if ("serviceWorker" in navigator) {
+    if (!("serviceWorker" in navigator)) {
+      return;
+    }
+    if (process.env.NODE_ENV === "production") {
       navigator.serviceWorker.register("/sw.js").catch(() => {
         /* offline shell is a bonus, never a requirement */
       });
+      return;
+    }
+    // Dev/preview hygiene: a worker registered by an older build would keep
+    // serving stale dev chunks (blank preview). Remove it and drop its caches
+    // so the preview always runs fresh.
+    navigator.serviceWorker
+      .getRegistrations()
+      .then((registrations) =>
+        Promise.all(registrations.map((registration) => registration.unregister())),
+      )
+      .catch(() => {});
+    if ("caches" in window) {
+      caches
+        .keys()
+        .then((keys) =>
+          Promise.all(
+            keys
+              .filter((key) => key.startsWith("skoit-"))
+              .map((key) => caches.delete(key)),
+          ),
+        )
+        .catch(() => {});
     }
   }, []);
   return null;
