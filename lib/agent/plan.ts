@@ -53,7 +53,7 @@ const RETRIEVAL_PATTERNS: Array<{ kind: RetrievalKind; pattern: RegExp }> = [
 
 /** Words that carry no subject once the request phrasing is removed. */
 const REQUEST_NOISE =
-  /\b(please|pls|kindly|hey|hi|hello|ok|okay|so|now|then|can you|could you|would you|i want|i need|i would like|give me|gimme|show me|find me|get me|fetch me|search for|search|look for|look up|pull up|download|free|royalty[\s-]?free|licen[cs]e[\s-]?free|unlimited|no copyright|copyright free|b[\s-]?roll|broll|stock|clips?|footage|videos?|images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|articles?|blogs?|news|latest|headlines?|breaking|exhaustive|sweep|everything|about|regarding|related to|for|of|on|some|any|the|a|an|chahiye|chaiye|dikhao|dikha|do|de|dedo|la|bhej|mujhe|mujhko|batao|bata|dekhna|dekhni|chahta|chahti|kuch|koi|bare|baare|mein|ki|ka|ke|hai|hain|kya|liye|wala|wali|aap|aapko|sakte|sakta|sakti|ho|hun|hu|kar|karke|karo|this|these|those|is|was|are|were|it|its|that|shown|above|below|attached)\b/gi;
+  /\b(please|pls|kindly|hey|hi|hello|ok|okay|so|now|then|can you|could you|would you|i want|i need|i would like|give me|gimme|show me|find me|get me|fetch me|search for|search|look for|look up|pull up|download|free|reusable|royalty[\s-]?free|licen[cs]e[\s-]?free|licen[cs]ed|unlimited|no copyright|copyright free|creative commons|cc0|public domain|b[\s-]?roll|broll|stock|clips?|footage|videos?|images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|articles?|blogs?|news|latest|headlines?|breaking|exhaustive|sweep|everything|about|regarding|related to|for|of|on|some|any|the|a|an|chahiye|chaiye|dikhao|dikha|do|de|dedo|la|bhej|mujhe|mujhko|batao|bata|dekhna|dekhni|chahta|chahti|kuch|koi|bare|baare|mein|ki|ka|ke|hai|hain|kya|liye|wala|wali|aap|aapko|sakte|sakta|sakti|ho|hun|hu|kar|karke|karo|this|these|those|is|was|are|were|it|its|that|shown|above|below|attached)\b/gi;
 
 /**
  * Devanagari request words. JS \b does not treat Devanagari as word characters,
@@ -366,7 +366,9 @@ export function buildPlan(request: AgentRequest): Plan {
       targets,
       steps,
       rationale:
-        attachments.length > 0 && provenanceAsk && intent.kinds.every((kind) => kind === "image")
+        attachments.length > 0 &&
+        provenanceAsk &&
+        intent.kinds.every((kind) => kind === "image")
           ? `A provenance question about the attached file — running ${steps.length} skill(s) over its own metadata and content hashes instead of a stock search.`
           : `Asked for ${intent.kinds.join(" + ")} on “${intent.topic}” — running ${steps.length} retrieval skill(s) and nothing else. ${
               focus === "focused"

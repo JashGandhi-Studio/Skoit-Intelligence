@@ -145,14 +145,22 @@ export function deterministicBriefing(
     return index ? ` [${index}]` : "";
   };
 
+  const findings = bundle.evidence.filter(
+    (item) => item.confidence === "confirmed" || item.confidence === "probable",
+  );
+
   lines.push("### Bottom line");
   if (bundle.evidence.length === 0) {
     lines.push(
       `No evidence was collected for this request (${failed.length} source(s) unavailable). Nothing about the target can be asserted yet — treat the question as open. The risk read (**${risk.band}**, ${risk.score}/100) reflects how much could not be verified, not any finding against the target.`,
     );
+  } else if (ok.length === 0) {
+    lines.push(
+      `No source completed this run (${failed.length} unavailable), so nothing is verified yet — the question is still open. The risk read (**${risk.band}**, ${risk.score}/100) reflects what could not be reached, not a finding against the target.`,
+    );
   } else {
     lines.push(
-      `${bundle.evidence.length} verified observation(s) across ${ok.length} completed skill(s)${
+      `${findings.length} finding(s) from ${ok.length} completed skill(s)${
         partial.length ? `, ${partial.length} partial` : ""
       }${failed.length ? `, ${failed.length} unavailable` : ""}. Risk read: **${risk.band}** (${risk.score}/100).`,
     );

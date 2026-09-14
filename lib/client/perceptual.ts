@@ -54,7 +54,8 @@ function greyPixels(
   const grey = new Uint8ClampedArray(width * height);
   for (let index = 0; index < grey.length; index += 1) {
     const offset = index * 4;
-    grey[index] = (data[offset] * 299 + data[offset + 1] * 587 + data[offset + 2] * 114) / 1000;
+    grey[index] =
+      (data[offset] * 299 + data[offset + 1] * 587 + data[offset + 2] * 114) / 1000;
   }
   return grey;
 }
@@ -65,7 +66,9 @@ function greyPixels(
  * difference hash survives re-encoding and resizing — together they let a match
  * be checked against Commons' content hashes without uploading anything.
  */
-export async function perceptualHashes(file: Blob): Promise<PerceptualHashes | undefined> {
+export async function perceptualHashes(
+  file: Blob,
+): Promise<PerceptualHashes | undefined> {
   if (typeof createImageBitmap !== "function") {
     return undefined;
   }
