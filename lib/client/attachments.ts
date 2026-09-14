@@ -2,6 +2,7 @@
 
 import exifr from "exifr";
 import { analyseDocument } from "@/lib/client/documents";
+import { perceptualHashes } from "@/lib/client/perceptual";
 import { md5, sha1, sha256, shannonEntropy } from "@/lib/crypto/digest";
 import type { AttachmentPayload, Evidence } from "@/lib/types";
 import { newId } from "@/lib/utils";
@@ -115,6 +116,20 @@ export async function analyseAttachment(
 
   if (file.type.startsWith("image/")) {
     payload.previewUrl = URL.createObjectURL(file);
+    const perceptual = await perceptualHashes(file);
+    if (perceptual) {
+      payload.perceptual = perceptual;
+      evidence.push({
+        id: newId("ev"),
+        skillId,
+        kind: "metric",
+        label: "Perceptual hashes",
+        value: `aHash ${perceptual.ahash} · dHash ${perceptual.dhash}`,
+        confidence: "confirmed",
+        observedAt: Date.now(),
+        detail: `${perceptual.width}×${perceptual.height} pixels. Computed locally; they survive re-encoding and resize, so they can be matched against content-hash indexes.`,
+      });
+    }
     try {
       const parsed = (await exifr.parse(bytes, {
         tiff: true,

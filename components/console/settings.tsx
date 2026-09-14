@@ -152,12 +152,14 @@ export function SettingsDialog({
       ),
       fetch("/api/keys").then((response) => (response.ok ? response.json() : null)),
     ]);
-    if (capResponse) {
+    if (capResponse && Array.isArray((capResponse as CapabilityResponse).manifest)) {
       setCapabilities(capResponse as CapabilityResponse);
       onCapabilities?.(capResponse as CapabilityResponse);
     }
     if (keyResponse) {
-      setKeys((keyResponse as { keys: KeyRow[] }).keys);
+      const rows = (keyResponse as { keys?: KeyRow[] }).keys;
+      // A response without a key list means "not loaded", never "no keys".
+      setKeys(Array.isArray(rows) ? rows : null);
     }
   }, [onCapabilities]);
 

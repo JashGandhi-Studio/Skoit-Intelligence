@@ -26,6 +26,23 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "providerId is required." }, { status: 400 });
   }
 
+  const keyEnv: Record<string, string> = {
+    sarvam: "SARVAM_API_KEY",
+    openai: "OPENAI_API_KEY",
+    anthropic: "ANTHROPIC_API_KEY",
+    google: "GOOGLE_GENERATIVE_AI_API_KEY",
+    compatible: "COMPATIBLE_API_KEY",
+  };
+  if (!(providerId in keyEnv)) {
+    return NextResponse.json(
+      {
+        error: "Unknown provider.",
+        known: Object.keys(keyEnv),
+      },
+      { status: 400 },
+    );
+  }
+
   if (providerId === "compatible") {
     const endpoint = body.endpoint?.trim() ?? "";
     const allowed = ALLOWED_ENDPOINTS.compatible;
@@ -44,13 +61,6 @@ export async function POST(request: Request): Promise<Response> {
   } else {
     await setPreferences({ provider: providerId });
   }
-  const keyEnv: Record<string, string> = {
-    sarvam: "SARVAM_API_KEY",
-    openai: "OPENAI_API_KEY",
-    anthropic: "ANTHROPIC_API_KEY",
-    google: "GOOGLE_GENERATIVE_AI_API_KEY",
-    compatible: "COMPATIBLE_API_KEY",
-  };
   const envVar = keyEnv[providerId];
   const configured = envVar ? Boolean(await runtimeEnv(envVar)) : false;
 

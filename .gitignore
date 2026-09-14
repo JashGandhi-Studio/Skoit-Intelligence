@@ -43,7 +43,8 @@ yarn-error.log*
 /blob-report/
 /playwright/*
 
-# local INDUS data (also lives in ~/.indus by default)
+# local SkOiT data (also lives in ~/.skoit by default)
+.skoit/
 .indus/
 
 # typescript incremental build cache

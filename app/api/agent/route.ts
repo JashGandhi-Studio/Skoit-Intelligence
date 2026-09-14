@@ -55,6 +55,17 @@ function parseAttachments(value: unknown): AttachmentPayload[] {
         ? item.exifErrors.slice(0, 6).map(String)
         : undefined,
       textPreview: item.textPreview ? String(item.textPreview).slice(0, 4000) : undefined,
+      perceptual:
+        item.perceptual &&
+        typeof item.perceptual.ahash === "string" &&
+        typeof item.perceptual.dhash === "string"
+          ? {
+              ahash: String(item.perceptual.ahash).slice(0, 64),
+              dhash: String(item.perceptual.dhash).slice(0, 64),
+              width: Number(item.perceptual.width) || 0,
+              height: Number(item.perceptual.height) || 0,
+            }
+          : undefined,
       coordinates:
         typeof lat === "number" && typeof lon === "number" ? { lat, lon } : undefined,
       document: item.document
