@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AnalysisBundle } from "@/lib/agent/synthesize";
+import { deterministicBriefing } from "@/lib/agent/synthesize";
 import type {
   AgentEvent,
   CaseFile,
   CaseTurn,
   Evidence,
   PlannedStep,
+  RiskAssessment,
   SkillOutcome,
 } from "@/lib/types";
 import { download, newId, slugify } from "@/lib/utils";
@@ -407,6 +409,40 @@ export function useCases() {
 }
 
 /** Rebuilds an analysis bundle from a rendered turn so risk and briefing can be recomputed. */
+/**
+ * Never lets a merged pass silently contradict the write-up: the model briefing
+ * is kept and gains a labelled addendum, while an analyst briefing is rebuilt
+ * over the merged bundle.
+ */
+export function mergedAnswer(
+  turn: TurnView,
+  bundle: AnalysisBundle,
+  risk: RiskAssessment,
+  evidenceBeforePass: number,
+): string {
+  if (turn.answerMode !== "model" || !turn.answer) {
+    return deterministicBriefing(bundle, risk);
+  }
+  const added = turn.evidence.slice(evidenceBeforePass);
+  if (added.length === 0) {
+    return turn.answer;
+  }
+  return [
+    turn.answer,
+    "",
+    "---",
+    "",
+    "### Browser-side addendum",
+    "",
+    `Collected after the server pass, from this browser. Risk is re-scored over the merged set: **${risk.band}** (${risk.score}/100).`,
+    "",
+    ...added.map(
+      (item) =>
+        `- **${item.label}** — ${item.value}${item.detail ? `\n  - ${item.detail}` : ""}`,
+    ),
+  ].join("\n");
+}
+
 export function bundleFromTurn(turn: TurnView): AnalysisBundle {
   return {
     question: turn.question,

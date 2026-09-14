@@ -143,7 +143,7 @@ export function deterministicBriefing(
   lines.push("### Bottom line");
   if (bundle.evidence.length === 0) {
     lines.push(
-      `No evidence was collected for this request (${failed.length} source(s) unavailable). Nothing about the target can be asserted yet — treat the question as open.`,
+      `No evidence was collected for this request (${failed.length} source(s) unavailable). Nothing about the target can be asserted yet — treat the question as open. The risk read (**${risk.band}**, ${risk.score}/100) reflects how much could not be verified, not any finding against the target.`,
     );
   } else {
     lines.push(

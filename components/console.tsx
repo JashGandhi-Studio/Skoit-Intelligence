@@ -28,14 +28,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/field";
 import { Skeleton, Tip } from "@/components/ui/misc";
-import {
-  type AnalysisBundle,
-  assessRisk,
-  deterministicBriefing,
-} from "@/lib/agent/synthesize";
+import { assessRisk } from "@/lib/agent/synthesize";
 import {
   applyEvent,
   bundleFromTurn,
+  mergedAnswer,
   type TurnView,
   toCaseTurn,
   useCases,
@@ -43,48 +40,8 @@ import {
 import { runClientPass } from "@/lib/client/runner";
 import { getSkill, manifest } from "@/lib/skills";
 import { detectTargets } from "@/lib/skills/identify";
-import type {
-  AgentEvent,
-  AgentRequest,
-  CaseFile,
-  CaseTurn,
-  RiskAssessment,
-} from "@/lib/types";
+import type { AgentEvent, AgentRequest, CaseFile, CaseTurn } from "@/lib/types";
 import { cn, formatDuration } from "@/lib/utils";
-
-/**
- * Never lets a merged pass silently contradict the write-up: the model briefing
- * is kept and gains a labelled addendum, while an analyst briefing is rebuilt
- * over the merged bundle.
- */
-function mergedAnswer(
-  turn: TurnView,
-  bundle: AnalysisBundle,
-  risk: RiskAssessment,
-  evidenceBeforePass: number,
-): string {
-  if (turn.answerMode !== "model" || !turn.answer) {
-    return deterministicBriefing(bundle, risk);
-  }
-  const added = turn.evidence.slice(evidenceBeforePass);
-  if (added.length === 0) {
-    return turn.answer;
-  }
-  return [
-    turn.answer,
-    "",
-    "---",
-    "",
-    "### Browser-side addendum",
-    "",
-    `Collected after the server pass, from this browser. Risk is re-scored over the merged set: **${risk.band}** (${risk.score}/100).`,
-    "",
-    ...added.map(
-      (item) =>
-        `- **${item.label}** — ${item.value}${item.detail ? `\n  - ${item.detail}` : ""}`,
-    ),
-  ].join("\n");
-}
 
 const STARTERS = [
   {
@@ -810,94 +767,99 @@ export function Console() {
             ) : null}
 
             <div className="space-y-4">
-              {turns.map((turn) => (
-                <div key={turn.id} className="space-y-3">
-                  <div className="flex justify-end">
-                    <div className="max-w-[86%] rounded-2xl rounded-br-md border border-hairline bg-surface-2 px-3.5 py-2.5">
-                      <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-foreground">
-                        {turn.question}
-                      </p>
-                      {turn.targets.length > 0 ? (
-                        <div className="mt-1.5 flex flex-wrap gap-1">
-                          {detectTargets(turn.question, 4).map((target) => (
-                            <Badge
-                              key={`${target.kind}-${target.value}`}
-                              tone="primary"
-                              mono
-                            >
-                              {target.kind}
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : null}
+              {turns.map((turn) => {
+                // Reopened cases carry no live target list, so the question is
+                // re-scanned for its badges instead of losing them.
+                const detectedTargets = detectTargets(turn.question, 4);
+                return (
+                  <div key={turn.id} className="space-y-3">
+                    <div className="flex justify-end">
+                      <div className="max-w-[86%] rounded-2xl rounded-br-md border border-hairline bg-surface-2 px-3.5 py-2.5">
+                        <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-foreground">
+                          {turn.question}
+                        </p>
+                        {detectedTargets.length > 0 ? (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {detectedTargets.map((target) => (
+                              <Badge
+                                key={`${target.kind}-${target.value}`}
+                                tone="primary"
+                                mono
+                              >
+                                {target.kind}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
+
+                    <PlanCard turn={turn} />
+
+                    {turn.steps.length > 0 ? (
+                      <div className="space-y-2">
+                        {turn.steps.map((step, index) => (
+                          <StepCard key={step.stepId} step={step} index={index} />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 rounded-xl border border-hairline bg-surface px-3.5 py-3 text-[12.5px] text-muted-foreground">
+                        <Info className="size-3.5 text-primary" />
+                        Planning the collection chain…
+                      </div>
+                    )}
+
+                    {turn.notices.length > 0 ? (
+                      <div className="rounded-xl border border-hairline bg-surface-2/50">
+                        <button
+                          type="button"
+                          onClick={() => setNoticeOpen((value) => !value)}
+                          className="flex w-full items-center justify-between px-3.5 py-2.5"
+                        >
+                          <span className="flex items-center gap-2 text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
+                            <ShieldQuestion className="size-3.5" />
+                            Runner notes ({turn.notices.length})
+                          </span>
+                          <ChevronDown
+                            className={cn(
+                              "size-3.5 text-faint-foreground transition-transform",
+                              noticeOpen && "rotate-180",
+                            )}
+                          />
+                        </button>
+                        {noticeOpen ? (
+                          <ul className="space-y-1 border-t border-hairline px-3.5 py-2.5">
+                            {turn.notices.map((notice) => (
+                              <li
+                                key={`${notice.level}-${notice.message}`}
+                                className={cn(
+                                  "text-[12px] leading-relaxed",
+                                  notice.level === "error"
+                                    ? "text-danger"
+                                    : notice.level === "warn"
+                                      ? "text-warning"
+                                      : "text-muted-foreground",
+                                )}
+                              >
+                                · {notice.message}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {turn.answer ? (
+                      <Briefing turn={turn} caseTitle={active?.title ?? "case"} />
+                    ) : turn.phase === "done" ? (
+                      <div className="rounded-xl border border-hairline bg-surface px-3.5 py-3 text-[12.5px] text-muted-foreground">
+                        The run finished without a written briefing — check the runner
+                        notes above for the reason.
+                      </div>
+                    ) : null}
                   </div>
-
-                  <PlanCard turn={turn} />
-
-                  {turn.steps.length > 0 ? (
-                    <div className="space-y-2">
-                      {turn.steps.map((step, index) => (
-                        <StepCard key={step.stepId} step={step} index={index} />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 rounded-xl border border-hairline bg-surface px-3.5 py-3 text-[12.5px] text-muted-foreground">
-                      <Info className="size-3.5 text-primary" />
-                      Planning the collection chain…
-                    </div>
-                  )}
-
-                  {turn.notices.length > 0 ? (
-                    <div className="rounded-xl border border-hairline bg-surface-2/50">
-                      <button
-                        type="button"
-                        onClick={() => setNoticeOpen((value) => !value)}
-                        className="flex w-full items-center justify-between px-3.5 py-2.5"
-                      >
-                        <span className="flex items-center gap-2 text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
-                          <ShieldQuestion className="size-3.5" />
-                          Runner notes ({turn.notices.length})
-                        </span>
-                        <ChevronDown
-                          className={cn(
-                            "size-3.5 text-faint-foreground transition-transform",
-                            noticeOpen && "rotate-180",
-                          )}
-                        />
-                      </button>
-                      {noticeOpen ? (
-                        <ul className="space-y-1 border-t border-hairline px-3.5 py-2.5">
-                          {turn.notices.map((notice) => (
-                            <li
-                              key={`${notice.level}-${notice.message}`}
-                              className={cn(
-                                "text-[12px] leading-relaxed",
-                                notice.level === "error"
-                                  ? "text-danger"
-                                  : notice.level === "warn"
-                                    ? "text-warning"
-                                    : "text-muted-foreground",
-                              )}
-                            >
-                              · {notice.message}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {turn.answer ? (
-                    <Briefing turn={turn} caseTitle={active?.title ?? "case"} />
-                  ) : turn.phase === "done" ? (
-                    <div className="rounded-xl border border-hairline bg-surface px-3.5 py-3 text-[12.5px] text-muted-foreground">
-                      The run finished without a written briefing — check the runner notes
-                      above for the reason.
-                    </div>
-                  ) : null}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea, Tab, TabContent, TabList } from "@/components/ui/misc";
+import { ScrollArea, Tab, TabContent, TabList, Tabs } from "@/components/ui/misc";
 import type { TurnView } from "@/lib/client/cases";
 import { cn, formatClock } from "@/lib/utils";
 
@@ -171,149 +171,151 @@ export function IntelPanel({
         </div>
       )}
 
-      <TabList className="w-full justify-between">
-        <Tab value="findings" count={findings.length}>
-          Findings
-        </Tab>
-        <Tab value="entities" count={entities.length}>
-          Pivots
-        </Tab>
-        <Tab value="sources" count={sources.length}>
-          Sources
-        </Tab>
-      </TabList>
+      <Tabs defaultValue="findings" className="flex min-h-0 flex-1 flex-col gap-2.5">
+        <TabList className="w-full justify-between">
+          <Tab value="findings" count={findings.length}>
+            Findings
+          </Tab>
+          <Tab value="entities" count={entities.length}>
+            Pivots
+          </Tab>
+          <Tab value="sources" count={sources.length}>
+            Sources
+          </Tab>
+        </TabList>
 
-      <TabContent value="findings">
-        <ScrollArea className="h-full">
-          {findings.length === 0 ? (
-            <EmptyIntel hint="Findings appear here as each skill reports. Every entry is evidence with a source, a confidence level and, where relevant, a severity." />
-          ) : (
-            <ul className="space-y-2 pr-1 pb-4">
-              {findings.map((item) => (
-                <li
-                  key={item.id}
-                  className="rounded-lg border border-hairline bg-surface p-2.5"
-                >
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[12px] font-medium text-foreground">
-                      {item.label}
-                    </span>
-                    {item.severity && item.severity !== "info" ? (
-                      <Badge tone={SEVERITY_TONE[item.severity] ?? "neutral"} mono>
-                        {item.severity}
-                      </Badge>
-                    ) : null}
-                    <Badge tone="neutral" mono={false}>
-                      {item.confidence}
-                    </Badge>
-                  </div>
-                  <p className="data-mono mt-1.5 break-words text-foreground">
-                    {item.value}
-                  </p>
-                  {item.detail ? (
-                    <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-                      {item.detail}
-                    </p>
-                  ) : null}
-                  <p className="mt-1.5 text-[10.5px] text-faint-foreground">
-                    {item.skillId} · {formatClock(item.observedAt)}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </ScrollArea>
-      </TabContent>
-
-      <TabContent value="entities">
-        <ScrollArea className="h-full">
-          {entities.length === 0 ? (
-            <EmptyIntel hint="Anything the sources surfaced that is worth pivoting on — subdomains, addresses, handles, dates — is grouped here." />
-          ) : (
-            <ul className="space-y-1.5 pr-1 pb-4">
-              {entities.map((item) => (
-                <li
-                  key={item.id}
-                  className="flex items-start gap-2.5 rounded-lg border border-hairline bg-surface px-2.5 py-2"
-                >
-                  <Fingerprint className="mt-0.5 size-3.5 shrink-0 text-faint-foreground" />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <Badge tone="info" mono>
-                        {item.type}
-                      </Badge>
-                      <Badge tone="neutral" mono>
+        <TabContent value="findings">
+          <ScrollArea className="h-full">
+            {findings.length === 0 ? (
+              <EmptyIntel hint="Findings appear here as each skill reports. Every entry is evidence with a source, a confidence level and, where relevant, a severity." />
+            ) : (
+              <ul className="space-y-2 pr-1 pb-4">
+                {findings.map((item) => (
+                  <li
+                    key={item.id}
+                    className="rounded-lg border border-hairline bg-surface p-2.5"
+                  >
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[12px] font-medium text-foreground">
+                        {item.label}
+                      </span>
+                      {item.severity && item.severity !== "info" ? (
+                        <Badge tone={SEVERITY_TONE[item.severity] ?? "neutral"} mono>
+                          {item.severity}
+                        </Badge>
+                      ) : null}
+                      <Badge tone="neutral" mono={false}>
                         {item.confidence}
                       </Badge>
                     </div>
-                    <p className="data-mono mt-1 break-all text-foreground">
+                    <p className="data-mono mt-1.5 break-words text-foreground">
                       {item.value}
                     </p>
-                    {item.label ? (
-                      <p className="mt-0.5 text-[11px] text-faint-foreground">
-                        {item.label}
+                    {item.detail ? (
+                      <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                        {item.detail}
                       </p>
                     ) : null}
-                    {item.attributes.length > 0 ? (
-                      <p className="mt-0.5 text-[11px] text-faint-foreground">
-                        {item.attributes
-                          .map((attribute) => `${attribute.key}=${attribute.value}`)
-                          .join(" · ")}
-                      </p>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </ScrollArea>
-      </TabContent>
+                    <p className="mt-1.5 text-[10.5px] text-faint-foreground">
+                      {item.skillId} · {formatClock(item.observedAt)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </ScrollArea>
+        </TabContent>
 
-      <TabContent value="sources">
-        <ScrollArea className="h-full">
-          {sources.length === 0 ? (
-            <EmptyIntel hint="Every consulted source is listed with the time it was accessed, whether it succeeded or not. Unreachable sources stay visible here." />
-          ) : (
-            <ul className="space-y-1.5 pr-1 pb-4">
-              {sources.map((sourceRef, index) => (
-                <li
-                  key={sourceRef.id}
-                  className="rounded-lg border border-hairline bg-surface px-2.5 py-2"
-                >
-                  <div className="flex items-start gap-2">
-                    <span className="mt-0.5 font-mono text-[10.5px] text-faint-foreground tabular">
-                      [{index + 1}]
-                    </span>
+        <TabContent value="entities">
+          <ScrollArea className="h-full">
+            {entities.length === 0 ? (
+              <EmptyIntel hint="Anything the sources surfaced that is worth pivoting on — subdomains, addresses, handles, dates — is grouped here." />
+            ) : (
+              <ul className="space-y-1.5 pr-1 pb-4">
+                {entities.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex items-start gap-2.5 rounded-lg border border-hairline bg-surface px-2.5 py-2"
+                  >
+                    <Fingerprint className="mt-0.5 size-3.5 shrink-0 text-faint-foreground" />
                     <div className="min-w-0">
-                      <p className="text-[12.5px] font-medium text-foreground">
-                        {sourceRef.label}
+                      <div className="flex items-center gap-1.5">
+                        <Badge tone="info" mono>
+                          {item.type}
+                        </Badge>
+                        <Badge tone="neutral" mono>
+                          {item.confidence}
+                        </Badge>
+                      </div>
+                      <p className="data-mono mt-1 break-all text-foreground">
+                        {item.value}
                       </p>
-                      {sourceRef.url ? (
-                        <a
-                          href={sourceRef.url}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-primary-strong hover:underline"
-                        >
-                          <Link2 className="size-3 shrink-0" />
-                          <span className="truncate">{sourceRef.url}</span>
-                        </a>
-                      ) : (
-                        <p className="mt-0.5 flex items-center gap-1 text-[11px] text-faint-foreground">
-                          <Database className="size-3" /> local dataset, no network call
+                      {item.label ? (
+                        <p className="mt-0.5 text-[11px] text-faint-foreground">
+                          {item.label}
                         </p>
-                      )}
-                      <p className="mt-0.5 text-[10.5px] text-faint-foreground">
-                        {sourceRef.kind} · accessed {formatClock(sourceRef.accessedAt)}
-                      </p>
+                      ) : null}
+                      {item.attributes.length > 0 ? (
+                        <p className="mt-0.5 text-[11px] text-faint-foreground">
+                          {item.attributes
+                            .map((attribute) => `${attribute.key}=${attribute.value}`)
+                            .join(" · ")}
+                        </p>
+                      ) : null}
                     </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </ScrollArea>
-      </TabContent>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </ScrollArea>
+        </TabContent>
+
+        <TabContent value="sources">
+          <ScrollArea className="h-full">
+            {sources.length === 0 ? (
+              <EmptyIntel hint="Every consulted source is listed with the time it was accessed, whether it succeeded or not. Unreachable sources stay visible here." />
+            ) : (
+              <ul className="space-y-1.5 pr-1 pb-4">
+                {sources.map((sourceRef, index) => (
+                  <li
+                    key={sourceRef.id}
+                    className="rounded-lg border border-hairline bg-surface px-2.5 py-2"
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="mt-0.5 font-mono text-[10.5px] text-faint-foreground tabular">
+                        [{index + 1}]
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[12.5px] font-medium text-foreground">
+                          {sourceRef.label}
+                        </p>
+                        {sourceRef.url ? (
+                          <a
+                            href={sourceRef.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-primary-strong hover:underline"
+                          >
+                            <Link2 className="size-3 shrink-0" />
+                            <span className="truncate">{sourceRef.url}</span>
+                          </a>
+                        ) : (
+                          <p className="mt-0.5 flex items-center gap-1 text-[11px] text-faint-foreground">
+                            <Database className="size-3" /> local dataset, no network call
+                          </p>
+                        )}
+                        <p className="mt-0.5 text-[10.5px] text-faint-foreground">
+                          {sourceRef.kind} · accessed {formatClock(sourceRef.accessedAt)}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </ScrollArea>
+        </TabContent>
+      </Tabs>
 
       {turn?.stats ? (
         <div className="flex items-center gap-3 rounded-xl border border-hairline bg-surface-2/60 px-3 py-2">

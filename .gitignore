@@ -45,3 +45,6 @@ yarn-error.log*
 
 # local INDUS data (also lives in ~/.indus by default)
 .indus/
+
+# typescript incremental build cache
+*.tsbuildinfo
