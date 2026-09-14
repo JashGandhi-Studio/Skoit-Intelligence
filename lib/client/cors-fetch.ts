@@ -205,15 +205,20 @@ export async function relayText(
   const tried: string[] = [];
   const { accept, signal, skipDirect } = options;
 
-  // On the server there is no CORS and no reason to touch third-party relays:
-  // one direct call, with the full budget.
+  // On the server there is no CORS, so a direct call is the fast path — but a
+  // few engines refuse datacenter IPs outright, so on a direct refusal the
+  // relay chain still gets a say before the run reports a dead source.
+  // skipDirect is a browser-only economy (skip a fetch the browser would
+  // refuse anyway); the server has no CORS, so direct is always worth trying.
+  let skipDirectNow = Boolean(skipDirect) && !ON_SERVER;
   if (ON_SERVER) {
     tried.push("direct");
+    skipDirectNow = true; // the chain below must not repeat the attempt
     try {
       const response = await timedFetch(
         url,
         { headers: directHeaders(accept) },
-        options.timeoutMs ?? 12_000,
+        Math.min(options.timeoutMs ?? 12_000, 10_000),
         signal,
       );
       if (response.ok) {
@@ -223,17 +228,8 @@ export async function relayText(
           ms: Date.now() - started,
         };
       }
-      return {
-        error: `the source answered ${response.status}`,
-        tried,
-        ms: Date.now() - started,
-      };
     } catch {
-      return {
-        error: "the source was unreachable from the server",
-        tried,
-        ms: Date.now() - started,
-      };
+      /* direct refused or unreachable — relays are next */
     }
   }
 
@@ -243,7 +239,7 @@ export async function relayText(
     timeoutMs: number;
     init?: RequestInit;
   }> = [];
-  if (!skipDirect) {
+  if (!skipDirectNow) {
     tried.push("direct");
     routes.push({
       label: "direct",
@@ -333,14 +329,15 @@ export async function relayBytes(
   const started = Date.now();
   const tried: string[] = [];
 
-  // Server: direct only — no CORS, so no relays are involved at all.
+  // Server: direct is the fast path; the binary-safe relays stay as backup
+  // for publishers that block datacenter ranges.
   if (ON_SERVER) {
     tried.push("direct");
     try {
       const response = await timedFetch(
         url,
         undefined,
-        options.timeoutMs ?? 12_000,
+        Math.min(options.timeoutMs ?? 12_000, 10_000),
         options.signal,
       );
       if (response.ok) {
@@ -355,13 +352,8 @@ export async function relayBytes(
         };
       }
     } catch {
-      /* reported below */
+      /* fall through to the shared relay chain */
     }
-    return {
-      error: "no route to the file (tried direct)",
-      tried,
-      ms: Date.now() - started,
-    };
   }
 
   const routes: Array<{
@@ -369,7 +361,9 @@ export async function relayBytes(
     url: string;
     timeoutMs: number;
     init?: RequestInit;
-  }> = [{ label: "direct", url, timeoutMs: options.timeoutMs ?? RELAY_TIMEOUT_MS }];
+  }> = ON_SERVER
+    ? [] // the server already attempted direct above
+    : [{ label: "direct", url, timeoutMs: options.timeoutMs ?? RELAY_TIMEOUT_MS }];
 
   // Images get one extra, extremely reliable route: the wsrv.nl image proxy
   // (CORS-open, binary-safe, long-lived). It only ever serves images.

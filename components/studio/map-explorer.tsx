@@ -221,7 +221,9 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     // dark panel where the globe should be.
     try {
       const probe = document.createElement("canvas");
-      if (!probe.getContext("webgl2") && !probe.getContext("webgl")) {
+      // maplibre-gl v6 draws through WebGL2; without it the globe would be a
+      // silent black square, so the console says so instead.
+      if (!probe.getContext("webgl2")) {
         setNoWebgl(true);
         return;
       }
