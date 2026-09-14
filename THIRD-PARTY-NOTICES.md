@@ -20,6 +20,7 @@ SkOiT bundles the libraries below. Licences are quoted from each package's own
 | `crypto-js` | 4.2.0 | MIT |
 | `exifr` | 7.1.3 | MIT |
 | `jspdf` | 4.2.1 | MIT |
+| `tesseract.js` | 6.0.1 | Apache-2.0 |
 | `pdf-lib` | 1.17.1 | MIT |
 | `qrcode` | 1.5.4 | MIT |
 | `libphonenumber-js` | 1.13.13 | MIT |

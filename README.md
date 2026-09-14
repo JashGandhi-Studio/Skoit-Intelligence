@@ -4,7 +4,7 @@ A working open-source-intelligence workbench that runs on your own machine. It c
 public sources, shows exactly what it could **not** verify, scores the gaps as well as the findings,
 and saves every run as a case file you own.
 
-No accounts. No cloud database. No telemetry. 40 skills — 29 live against public endpoints, 11 offline
+No accounts. No cloud database. No telemetry. 42 skills — 29 live against public endpoints, 13 offline
 validators — and one rule enforced throughout: **nothing is asserted that was not collected.**
 
 ```
