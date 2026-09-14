@@ -1,4 +1,5 @@
-import { parsePhoneNumberFromString } from "libphonenumber-js";
+// /max bundles the full metadata set: exact line-type ranges per prefix.
+import { parsePhoneNumberFromString } from "libphonenumber-js/max";
 import { md5, sha256 } from "@/lib/crypto/digest";
 import { dnsSource, resolveDns, txtRecords } from "@/lib/net/dns";
 import { concurrency, request, source } from "@/lib/net/http";
@@ -902,6 +903,17 @@ export const phoneIntelligence: SkillDefinition = {
       summary: `${parsed.number} — ${parsed.country ?? "unknown country"}, ${typeLabel[type] ?? type}, valid: ${parsed.isValid() ? "yes" : "no"}.`,
       evidence: [
         evidence(skill, "E.164", parsed.number, { source: localSource }),
+        evidence(
+          skill,
+          "Presence",
+          "not available — and no honest source can provide it",
+          {
+            kind: "warning",
+            confidence: "confirmed",
+            detail:
+              "Last-seen/online status of an arbitrary number is not exposed by any platform to strangers, and no carrier sells it. Sites or apps claiming to show it are scams or spyware — this skill will not pretend to.",
+          },
+        ),
         evidence(
           skill,
           "Country",

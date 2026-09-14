@@ -131,6 +131,17 @@ This is the part that matters, and it is structural rather than a prompt instruc
 - Files never leave the browser: EXIF, hashing, entropy and PDF structure are parsed locally, and only
   the derived findings travel with the request.
 
+## Map & Globe
+
+A real zoomable planet, inside the console: ask "where is the Taj Mahal" (or "map of Tokyo", "locate
+Shibuya") and the globe opens and flies there. Spin it, pinch-zoom from orbit to street level, tap any
+spot to see what it is — reverse-geocoded on the spot, with a short Wikipedia summary and a link.
+Vector tiles from OpenFreeMap fall back to OpenStreetMap raster; search and place facts come from
+Nominatim and Wikipedia in your browser. Globe and flat views are one tap apart, and the locate button
+drops the pin on where you stand. One honest limit: a phone number can tell you country and line type
+(offline metadata), but **no tool can show an arbitrary number's last-seen/online status** — platforms
+don't expose it to strangers, and anything claiming to is a scam.
+
 ## Files, PDFs and voice
 
 Attach up to 6 files (8 MB each). Images are parsed for EXIF — device, serial, lens, timestamps, GPS —

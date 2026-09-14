@@ -2,6 +2,7 @@
 
 import {
   ChevronDown,
+  Globe2,
   Info,
   Menu,
   Moon,
@@ -13,6 +14,7 @@ import {
   WifiOff,
   Wrench,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Briefing } from "@/components/console/briefing";
@@ -27,6 +29,19 @@ import { SettingsDialog } from "@/components/console/settings";
 import { StepCard } from "@/components/console/step-card";
 import { ViewerDialog, type ViewerRequest } from "@/components/console/viewers";
 import { DocumentWorkshop } from "@/components/studio/document-workshop";
+
+const MapExplorer = dynamic(
+  () => import("@/components/studio/map-explorer").then((mod) => mod.MapExplorer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center text-[12px] text-muted-foreground">
+        Loading the globe…
+      </div>
+    ),
+  },
+);
+
 import { QrStudio } from "@/components/studio/qr-studio";
 import { useTheme } from "@/components/theme-provider";
 import { Badge } from "@/components/ui/badge";
@@ -75,6 +90,10 @@ const STARTERS = [
   {
     label: "Mumbai news",
     prompt: "Mumbai news today",
+  },
+  {
+    label: "Where is the Taj Mahal",
+    prompt: "Where is the Taj Mahal",
   },
   {
     label: "Check a forward",
@@ -185,6 +204,8 @@ export function Console() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workshopOpen, setWorkshopOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [mapQuery, setMapQuery] = useState("");
   const [guideOpen, setGuideOpen] = useState(false);
   const [viewer, setViewer] = useState<{ request: ViewerRequest; open: boolean } | null>(
     null,
@@ -658,13 +679,31 @@ export function Console() {
   const notices = turns.flatMap((turn) => turn.notices);
   const lastNotice = notices[notices.length - 1];
 
+  const openMap = useCallback((place?: string) => {
+    setMapQuery(place ?? "");
+    setMapOpen(true);
+  }, []);
+
   // Quick-prompt chips inside briefings (country pickers and friends) start a
-  // new run without the analyst retyping anything.
+  // new run without the analyst retyping anything. Map asks never round-trip
+  // through the planner — the globe opens the same instant.
   const runPrompt = useCallback(
     (prompt: string) => {
+      const trimmed = prompt.trim();
+      if (/^open (?:the )?map\b/i.test(trimmed)) {
+        openMap();
+        return;
+      }
+      const mapAsk = trimmed.match(
+        /\b(?:where is|where's|map of|locate|show me a map of)\s+(.{2,80}?)(?:\s+on\s+a\s+map)?\??$/i,
+      );
+      if (mapAsk) {
+        openMap(mapAsk[1].replace(/[?!.]+$/, "").trim());
+        return;
+      }
       void run({ message: prompt });
     },
-    [run],
+    [openMap, run],
   );
 
   if (!hydrated) {
@@ -725,6 +764,7 @@ export function Console() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenWorkshop={() => setWorkshopOpen(true)}
           onOpenQr={() => setQrOpen(true)}
+          onOpenMap={() => openMap()}
           onOpenGuide={() => setGuideOpen(true)}
           egress={egress}
           skillCount={skills.length}
@@ -778,6 +818,10 @@ export function Console() {
                     onOpenQr={() => {
                       setMobileNav(false);
                       window.setTimeout(() => setQrOpen(true), 120);
+                    }}
+                    onOpenMap={() => {
+                      setMobileNav(false);
+                      window.setTimeout(() => openMap(), 120);
                     }}
                     onOpenGuide={() => {
                       setMobileNav(false);
@@ -965,6 +1009,10 @@ export function Console() {
                       <span className="hidden sm:inline">Open the QR Studio</span>
                       <span className="sm:hidden">QR</span>
                     </Button>
+                    <Button variant="outline" size="sm" onClick={() => openMap()}>
+                      <span className="hidden sm:inline">Open the Map & Globe</span>
+                      <span className="sm:hidden">Map</span>
+                    </Button>
                   </div>
                 </div>
 
@@ -1144,6 +1192,17 @@ export function Console() {
           className="w-[calc(100vw-1.5rem)] sm:max-w-[860px]"
         >
           <QrStudio />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={mapOpen} onOpenChange={setMapOpen}>
+        <DialogContent
+          title="Map & Globe"
+          description="The whole planet — zoom from orbit to street level, tap any spot to know what is there."
+          className="h-[min(80dvh,760px)] w-[calc(100vw-1.5rem)] sm:max-w-[920px]"
+          bodyClassName="p-0"
+        >
+          <MapExplorer initialQuery={mapQuery || undefined} />
         </DialogContent>
       </Dialog>
 

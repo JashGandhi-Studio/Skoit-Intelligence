@@ -14,12 +14,14 @@ export function DialogContent({
   description,
   children,
   className,
+  bodyClassName,
   side = "center",
 }: {
   title: string;
   description?: string;
   children: ReactNode;
   className?: string;
+  bodyClassName?: string;
   side?: "center" | "left" | "right" | "bottom";
 }) {
   const sideClasses = {
@@ -33,6 +35,13 @@ export function DialogContent({
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] data-[state=open]:animate-fade" />
+      {/*
+        The content box is an auto-height column capped by max-height. The
+        body below must therefore be `flex: 1 1 auto` + min-h-0: basis-auto
+        sizes the dialog to its content, and once the cap bites, the body
+        shrinks and scrolls. (flex-basis-0 here collapses the body to zero —
+        that was the "tiny window" bug.)
+      */}
       <DialogPrimitive.Content
         className={cn(
           "fixed z-50 flex flex-col overflow-hidden border border-hairline bg-surface shadow-pop",
@@ -57,7 +66,15 @@ export function DialogContent({
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
         </header>
-        <div className="thin-scroll min-h-0 flex-1 basis-0 overflow-y-auto overscroll-contain px-4 py-3.5">
+        <div
+          className={cn(
+            "thin-scroll min-h-0 flex-[1_1_auto] overflow-y-auto overscroll-contain px-4 py-3.5",
+            side === "center" || side === "bottom"
+              ? "max-h-[calc(88dvh-72px)]"
+              : undefined,
+            bodyClassName,
+          )}
+        >
           {children}
         </div>
       </DialogPrimitive.Content>

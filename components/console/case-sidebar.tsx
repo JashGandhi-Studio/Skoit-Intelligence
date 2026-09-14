@@ -5,6 +5,7 @@ import {
   FileJson,
   FileStack,
   FileText,
+  Globe2,
   Plus,
   QrCode,
   Search,
@@ -35,6 +36,7 @@ export function CaseSidebar({
   onOpenSettings,
   onOpenWorkshop,
   onOpenQr,
+  onOpenMap,
   onOpenGuide,
   onClose,
   egress,
@@ -50,6 +52,7 @@ export function CaseSidebar({
   onOpenSettings: () => void;
   onOpenWorkshop?: () => void;
   onOpenQr?: () => void;
+  onOpenMap?: () => void;
   onOpenGuide?: () => void;
   onClose?: () => void;
   egress: boolean | null;
@@ -116,12 +119,15 @@ export function CaseSidebar({
         <Button variant="primary" size="md" className="w-full" onClick={onCreate}>
           <Plus /> New case file
         </Button>
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-3 gap-1.5">
           <Button variant="outline" size="sm" className="w-full" onClick={onOpenWorkshop}>
-            <FileStack className="text-primary" /> Documents
+            <FileStack className="text-primary" /> Files
           </Button>
           <Button variant="outline" size="sm" className="w-full" onClick={onOpenQr}>
-            <QrCode className="text-primary" /> QR Studio
+            <QrCode className="text-primary" /> QR
+          </Button>
+          <Button variant="outline" size="sm" className="w-full" onClick={onOpenMap}>
+            <Globe2 className="text-primary" /> Map
           </Button>
         </div>
       </div>

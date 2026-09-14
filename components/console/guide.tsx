@@ -1,17 +1,19 @@
 "use client";
 
 import {
+  BadgeCheck,
   FileStack,
   Forward,
   Globe2,
   Image as ImageIcon,
   Languages,
-  MapPin,
   Music2,
+  Newspaper,
   QrCode,
   Receipt,
   ScrollText,
   Search,
+  Smartphone,
   Video,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -57,16 +59,64 @@ const SECTIONS: Array<{
     ],
   },
   {
-    icon: Globe2,
-    title: "News — for your country",
+    icon: Newspaper,
+    title: "News — country, state, your city",
     items: [
       {
         say: "Latest news",
         note: "The first time, SkOiT asks which country you're in, remembers it, and from then on always shows your country's freshest headlines.",
       },
       {
+        say: "Mumbai news",
+        note: "City and state editions too — “Maharashtra news”, “New York news”. Every result is clearly labelled: Mumbai · Maharashtra · India.",
+      },
+      {
         say: "News from Japan",
         note: "Switches your country any time. Tap any headline to read it in the built-in reader — and save it as a clean PDF.",
+      },
+    ],
+  },
+  {
+    icon: Languages,
+    title: "Instant translation",
+    items: [
+      {
+        say: "Translate to मराठी (after a news run)",
+        note: "The translate strip converts headlines and summaries instantly — हिन्दी, मराठी, தமிழ், తెలుగు, বাংলা, ગુજરાતી, English — always labelled as machine translation.",
+      },
+    ],
+  },
+  {
+    icon: Forward,
+    title: "Before you forward (WhatsApp checker)",
+    items: [
+      {
+        say: "Check this forward: <paste the whole message>",
+        note: "SkOiT strips the “forwarded many times” noise, finds where the claim first appeared, counts independent outlets, consults fact-checkers — and shows one big screen: forward this, hold, or don't.",
+      },
+    ],
+  },
+  {
+    icon: Receipt,
+    title: "Receipt scanner",
+    items: [
+      {
+        say: "Attach a photo of a shop bill + “check the GST”",
+        note: "On-device OCR reads the bill; GSTIN checksum, amount and date come back as copyable cards. It says plainly what was pattern-checked — it never claims the department verified anything.",
+      },
+    ],
+  },
+  {
+    icon: BadgeCheck,
+    title: "Answers with copyable cards",
+    items: [
+      {
+        say: "Verify 27AAPFU0939F1ZV",
+        note: "GSTIN, UPI ids, IFSC, vehicle plates and PINs come back as one-tap copy cards above the briefing — not buried in the text.",
+      },
+      {
+        say: "MH12AB1234 / SBIN0001234 / 400001",
+        note: "Plates, IFSC and PINs work the same way — instant pattern checks with the state and bank spelled out.",
       },
     ],
   },
@@ -76,7 +126,7 @@ const SECTIONS: Array<{
     items: [
       {
         say: "ICSE class 10 physics specimen paper",
-        note: "Finds the actual paper as a PDF — open it in-app or download it directly.",
+        note: "The Papers shelf: board (ICSE/CBSE/state), year and subject on every row — direct PDF, open in-app or download.",
       },
       {
         say: "Study material for class 10 science chapter electricity",
@@ -88,7 +138,7 @@ const SECTIONS: Array<{
       },
       {
         say: "Paste an Amazon/Flipkart link + “find the lowest price”",
-        note: "Reads the product, then hunts the same product across other stores so you can compare prices.",
+        note: "The price-hunt table: store by store, sorted cheapest first — every figure honestly labelled as coming from the search snippet, open the store to confirm.",
       },
     ],
   },
@@ -111,6 +161,20 @@ const SECTIONS: Array<{
     ],
   },
   {
+    icon: Globe2,
+    title: "Map & Globe",
+    items: [
+      {
+        say: "Where is the Taj Mahal",
+        note: "The globe opens and flies straight there, then tells you what the place is — a real 3D globe you can spin and pinch-zoom from orbit to street level.",
+      },
+      {
+        say: "Tap any spot on the map",
+        note: "Every spot answers back: its name, its area, a short Wikipedia summary. One tap flips between globe and flat map; the locate button drops you where you stand.",
+      },
+    ],
+  },
+  {
     icon: FileStack,
     title: "Document Workshop (in the left panel)",
     items: [
@@ -121,6 +185,10 @@ const SECTIONS: Array<{
       {
         say: "Merge · Split · Rotate/Delete · Watermark · Page numbers · Images → PDF",
         note: "All of it runs inside your browser; files never leave your machine.",
+      },
+      {
+        say: "N-up · Normalise A4 · Cover page · Details",
+        note: "Handout grids (2 or 4 per sheet), even out odd page sizes, give a PDF a proper cover, edit its title/author details.",
       },
     ],
   },
@@ -141,6 +209,20 @@ const SECTIONS: Array<{
       {
         say: "Everything you run is saved into a case file",
         note: "Rename, pin, search, export as markdown or JSON — all local to your device.",
+      },
+    ],
+  },
+  {
+    icon: Smartphone,
+    title: "An app on your home screen",
+    items: [
+      {
+        say: "Install it",
+        note: "The banner appears on first open — after that SkOiT runs full-screen and keeps working on a bad train network: your last cases, papers, QR codes and briefings still open with no signal.",
+      },
+      {
+        say: "Dictate and listen",
+        note: "The mic answers in your language (हिन्दी, मराठी, தமிழ்…), and the speaker button on any briefing reads it aloud in the same language.",
       },
     ],
   },

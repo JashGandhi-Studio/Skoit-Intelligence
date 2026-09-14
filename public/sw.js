@@ -8,7 +8,7 @@
  * QR studio all still open on a dead train network.
  */
 
-const CACHE = "skoit-shell-v2";
+const CACHE = "skoit-shell-v3";
 const SHELL = ["/", "/icon.svg", "/icon-192.png", "/icon-512.png", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
