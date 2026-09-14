@@ -1,6 +1,8 @@
 # pnpm treats this file as the workspace marker; SkOiT is a single package.
+# Settings live here (pnpm 10+ no longer reads the package.json "pnpm" field).
+minimumReleaseAge: 0 # sandbox builds resolve packages days behind real time
 allowBuilds:
-  # postinstall scripts needed for native bindings in the sandboxed build.
+  # native/binding postinstall scripts needed at build time
   sharp: true
   core-js: true
   esbuild: true
