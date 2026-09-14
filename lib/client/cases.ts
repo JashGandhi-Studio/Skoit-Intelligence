@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AnalysisBundle } from "@/lib/agent/synthesize";
-import { deterministicBriefing } from "@/lib/agent/synthesize";
+import {
+  deterministicBriefing,
+  isRetrievalAsk,
+  plainBriefing,
+  retrievalAnswer,
+} from "@/lib/agent/synthesize";
 import type {
   AgentEvent,
   ArticleItem,
@@ -442,9 +447,15 @@ export function mergedAnswer(
   bundle: AnalysisBundle,
   risk: RiskAssessment,
   evidenceBeforePass: number,
+  style: "plain" | "analyst" = "plain",
 ): string {
   if (turn.answerMode !== "model" || !turn.answer) {
-    return deterministicBriefing(bundle, risk);
+    if (isRetrievalAsk(bundle)) {
+      return retrievalAnswer(bundle);
+    }
+    return style === "analyst"
+      ? deterministicBriefing(bundle, risk)
+      : plainBriefing(bundle, risk);
   }
   const added = turn.evidence.slice(evidenceBeforePass);
   if (added.length === 0) {

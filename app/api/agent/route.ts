@@ -3,6 +3,9 @@ import {
   type AnalysisBundle,
   assessRisk,
   buildModelPrompt,
+  isRetrievalAsk,
+  PLAIN_INSTRUCTIONS,
+  RETRIEVAL_INSTRUCTIONS,
   SYNTHESIS_INSTRUCTIONS,
 } from "@/lib/agent/synthesize";
 import { sanitizePreferences } from "@/lib/preferences";
@@ -150,7 +153,9 @@ export async function POST(request: Request): Promise<Response> {
   request.signal.addEventListener("abort", () => abort.abort(), { once: true });
 
   const egress = await probeEgress(abort.signal);
-  const resolved = await resolveModel();
+  // "Built-in writer only" means exactly that: no model call, no evidence sent
+  // anywhere, the deterministic write-up renders the collected evidence.
+  const resolved = parsed.preferences?.ai === "off" ? null : await resolveModel();
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -186,7 +191,11 @@ export async function POST(request: Request): Promise<Response> {
             ? async (bundle: AnalysisBundle) => {
                 const text = await generateBriefing(
                   resolved,
-                  SYNTHESIS_INSTRUCTIONS,
+                  isRetrievalAsk(bundle)
+                    ? RETRIEVAL_INSTRUCTIONS
+                    : parsed.preferences?.answerStyle === "analyst"
+                      ? SYNTHESIS_INSTRUCTIONS
+                      : PLAIN_INSTRUCTIONS,
                   buildModelPrompt(bundle, assessRisk(bundle)),
                   abort.signal,
                 );

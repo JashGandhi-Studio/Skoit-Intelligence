@@ -127,7 +127,7 @@ function commonsSource(): SourceRef {
 
 async function commonsSearch(
   query: string,
-  kind: "image" | "video",
+  kind: "image" | "video" | "audio",
   limit: number,
   ctx: NetContext,
 ): Promise<{ items: MediaItem[]; error?: string }> {
@@ -136,7 +136,13 @@ async function commonsSearch(
     format: "json",
     origin: "*",
     generator: "search",
-    gsrsearch: `${kind === "image" ? "filetype:bitmap" : "filetype:video"} ${query}`,
+    gsrsearch: `${
+      kind === "image"
+        ? "filetype:bitmap"
+        : kind === "video"
+          ? "filetype:video"
+          : "filetype:audio"
+    } ${query}`,
     gsrnamespace: "6",
     gsrlimit: String(limit),
     prop: "imageinfo",
@@ -1993,9 +1999,576 @@ export const imageProvenance: SkillDefinition = {
   },
 };
 
+/* --------------------------------------------------------- Audio & music */
+
+const AUDIO_KEYWORDS = [
+  "song",
+  "songs",
+  "music",
+  "track",
+  "audio",
+  "mp3",
+  "tune",
+  "soundtrack",
+  "bgm",
+  "instrumental",
+  "bhajan",
+  "ghazal",
+  "qawwali",
+  "lofi",
+  "lo-fi",
+  "playlist",
+  "gana",
+  "gaana",
+  "sangeet",
+  "geet",
+  "dhun",
+  "raga",
+  "ringtone",
+  "jingle",
+  "podcast audio",
+  "गाना",
+  "गाने",
+  "संगीत",
+  "संगीतमय",
+  "धुन",
+  "ऑडियो",
+];
+
+const OPENVERSE_AUDIO_API = "https://api.openverse.org/v1/audio/";
+
+interface OpenverseAudioResponse {
+  results?: Array<{
+    id?: string;
+    title?: string;
+    creator?: string;
+    url?: string;
+    foreign_landing_url?: string;
+    license?: string;
+    license_version?: string;
+    license_url?: string;
+    provider?: string;
+    source?: string;
+    duration?: number;
+    filesize?: number;
+    filetype?: string;
+    thumbnail?: string;
+  }>;
+}
+
+async function openverseAudioSearch(
+  query: string,
+  limit: number,
+  reusable: boolean,
+  ctx: NetContext,
+): Promise<{ items: MediaItem[]; error?: string }> {
+  const params = new URLSearchParams({
+    q: query,
+    page_size: String(limit),
+    mature: "false",
+  });
+  if (reusable) {
+    params.set("license_type", "commercial");
+  }
+  const result = await request<OpenverseAudioResponse>(
+    `${OPENVERSE_AUDIO_API}?${params.toString()}`,
+    ctx,
+    { timeoutMs: 9000, retries: 0 },
+  );
+  if (!result.ok) {
+    return { items: [], error: result.error.message };
+  }
+
+  const items: MediaItem[] = [];
+  for (const hit of result.data.results ?? []) {
+    if (!hit.url || !hit.title) {
+      continue;
+    }
+    const licence = hit.license
+      ? `${hit.license.toUpperCase()}${hit.license_version ? ` ${hit.license_version}` : ""} (Openverse)`
+      : undefined;
+    items.push(
+      mediaItem({
+        kind: "audio",
+        title: truncate(hit.title, 140),
+        url: hit.url,
+        pageUrl: hit.foreign_landing_url,
+        thumbnailUrl: hit.thumbnail,
+        source: hit.provider ? `Openverse · ${hit.provider}` : "Openverse",
+        sourceId: "openverse",
+        licence,
+        licenceUrl: hit.license_url,
+        author: hit.creator,
+        artist: hit.creator,
+        durationMs: typeof hit.duration === "number" ? hit.duration : undefined,
+        bytes: typeof hit.filesize === "number" ? hit.filesize : undefined,
+        mime: hit.filetype,
+        query,
+        access: "download",
+      }),
+    );
+  }
+  return { items };
+}
+
+interface ArchiveAudioMetadata {
+  files?: Array<{
+    name?: string;
+    format?: string;
+    size?: string;
+    length?: string;
+    source?: string;
+    track?: string;
+  }>;
+}
+
+/** Internet Archive audio: the largest keyless source of playable, licensable music. */
+async function archiveAudioSearch(
+  query: string,
+  limit: number,
+  ctx: NetContext,
+): Promise<{ items: MediaItem[]; error?: string }> {
+  const params = new URLSearchParams({
+    q: `${query} AND mediatype:audio`,
+    rows: String(limit),
+    page: "1",
+    output: "json",
+  });
+  for (const field of [
+    "identifier",
+    "title",
+    "description",
+    "licenseurl",
+    "year",
+    "date",
+    "creator",
+  ]) {
+    params.append("fl[]", field);
+  }
+
+  const result = await request<ArchiveSearchResponse>(
+    `https://archive.org/advancedsearch.php?${params.toString()}`,
+    ctx,
+    { timeoutMs: 10000, retries: 0 },
+  );
+  if (!result.ok) {
+    return { items: [], error: result.error.message };
+  }
+
+  const docs = (result.data.response?.docs ?? []).filter(
+    (doc): doc is { identifier: string } & typeof doc => Boolean(doc.identifier),
+  );
+
+  const items = await concurrency(docs, 4, async (doc) => {
+    const metadata = await request<ArchiveAudioMetadata>(
+      `https://archive.org/metadata/${encodeURIComponent(doc.identifier)}`,
+      ctx,
+      { timeoutMs: 8000, retries: 0 },
+    );
+    if (!metadata.ok) {
+      return undefined;
+    }
+    const files = (metadata.data.files ?? []).filter(
+      (file) => file.name && /\.(mp3|ogg|oga|flac|m4a|opus|wav)$/i.test(file.name),
+    );
+    const file = files.find((candidate) => candidate.source === "original") ?? files[0];
+    if (!file?.name) {
+      return undefined;
+    }
+    return mediaItem({
+      kind: "audio",
+      title: truncate(stripHtml(doc.title) || doc.identifier, 140),
+      url: `https://archive.org/download/${encodeURIComponent(doc.identifier)}/${encodeURIComponent(file.name)}`,
+      thumbnailUrl: `https://archive.org/services/img/${encodeURIComponent(doc.identifier)}`,
+      pageUrl: `https://archive.org/details/${encodeURIComponent(doc.identifier)}`,
+      source: ARCHIVE_SOURCE.label,
+      sourceId: ARCHIVE_SOURCE.id,
+      licence: doc.licenseurl
+        ? `Item licence: ${doc.licenseurl}`
+        : "No licence stated on the item — check the item page before reuse",
+      licenceUrl: doc.licenseurl,
+      author: Array.isArray(doc.creator) ? doc.creator.join(", ") : doc.creator,
+      durationMs: durationOf(file.length),
+      bytes: file.size ? Number(file.size) : undefined,
+      mime: file.format,
+      publishedAt: timeOf(doc.date ?? String(doc.year ?? "")),
+      query,
+      access: "download",
+    });
+  });
+
+  return { items: items.filter((item): item is MediaItem => Boolean(item)) };
+}
+
+interface ItunesResponse {
+  results?: Array<{
+    trackName?: string;
+    artistName?: string;
+    collectionName?: string;
+    previewUrl?: string;
+    artworkUrl100?: string;
+    trackViewUrl?: string;
+    trackTimeMillis?: number;
+    releaseDate?: string;
+    primaryGenreName?: string;
+  }>;
+}
+
+/**
+ * Catalog previews. These are official 30-second excerpts with a link to the
+ * store page — the console never offers a copyrighted full track as a file.
+ */
+async function itunesSearch(
+  query: string,
+  limit: number,
+  ctx: NetContext,
+): Promise<{ items: MediaItem[]; error?: string }> {
+  const params = new URLSearchParams({
+    term: query,
+    media: "music",
+    entity: "song",
+    limit: String(limit),
+  });
+  const result = await request<ItunesResponse>(
+    `https://itunes.apple.com/search?${params.toString()}`,
+    ctx,
+    { timeoutMs: 9000, retries: 0 },
+  );
+  if (!result.ok) {
+    return { items: [], error: result.error.message };
+  }
+
+  const items: MediaItem[] = [];
+  for (const hit of result.data.results ?? []) {
+    if (!hit.previewUrl || !hit.trackName) {
+      continue;
+    }
+    items.push(
+      mediaItem({
+        kind: "audio",
+        title: truncate(
+          `${hit.trackName}${hit.artistName ? ` — ${hit.artistName}` : ""}`,
+          140,
+        ),
+        url: hit.previewUrl,
+        pageUrl: hit.trackViewUrl,
+        thumbnailUrl: hit.artworkUrl100?.replace("100x100", "400x400"),
+        source: "Apple Music (iTunes catalog)",
+        sourceId: "itunes",
+        licence: "30-second licensed preview — full track from the store",
+        author: hit.artistName,
+        artist: hit.artistName,
+        collection: hit.collectionName,
+        durationMs: hit.trackTimeMillis,
+        publishedAt: timeOf(hit.releaseDate),
+        query,
+        access: "preview",
+        previewOnly: true,
+        storeName: "Apple Music",
+        storeUrl: hit.trackViewUrl,
+      }),
+    );
+  }
+  return { items };
+}
+
+interface DeezerResponse {
+  data?: Array<{
+    id?: number;
+    title?: string;
+    duration?: number;
+    preview?: string;
+    link?: string;
+    artist?: { name?: string };
+    album?: { title?: string; cover_medium?: string };
+  }>;
+}
+
+async function deezerSearch(
+  query: string,
+  limit: number,
+  ctx: NetContext,
+): Promise<{ items: MediaItem[]; error?: string }> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  const result = await request<DeezerResponse>(
+    `https://api.deezer.com/search?${params.toString()}`,
+    ctx,
+    { timeoutMs: 9000, retries: 0 },
+  );
+  if (!result.ok) {
+    return { items: [], error: result.error.message };
+  }
+
+  const items: MediaItem[] = [];
+  for (const hit of result.data.data ?? []) {
+    if (!hit.preview || !hit.title) {
+      continue;
+    }
+    items.push(
+      mediaItem({
+        kind: "audio",
+        title: truncate(
+          `${hit.title}${hit.artist?.name ? ` — ${hit.artist.name}` : ""}`,
+          140,
+        ),
+        url: hit.preview,
+        pageUrl: hit.link,
+        thumbnailUrl: hit.album?.cover_medium,
+        source: "Deezer catalog",
+        sourceId: "deezer",
+        licence: "30-second licensed preview — full track from the store",
+        author: hit.artist?.name,
+        artist: hit.artist?.name,
+        collection: hit.album?.title,
+        durationMs: typeof hit.duration === "number" ? hit.duration * 1000 : undefined,
+        query,
+        access: "preview",
+        previewOnly: true,
+        storeName: "Deezer",
+        storeUrl: hit.link,
+      }),
+    );
+  }
+  return { items };
+}
+
+interface JamendoResponse {
+  results?: Array<{
+    id?: string;
+    name?: string;
+    artist_name?: string;
+    album_name?: string;
+    duration?: number;
+    audio?: string;
+    audiodownload?: string;
+    audiodownload_allowed?: boolean;
+    license_ccurl?: string;
+    image?: string;
+    shareurl?: string;
+  }>;
+}
+
+const JAMENDO_SOURCE = {
+  id: "jamendo",
+  label: "Jamendo",
+  url: "https://www.jamendo.com/",
+} as const;
+
+/**
+ * Jamendo is Creative Commons end to end: its API gives the master file, and a
+ * free client id is all it asks for. Nothing here is a rehost of copyrighted
+ * work — the licence travels with the track.
+ */
+async function jamendoSearch(
+  query: string,
+  limit: number,
+  key: string,
+  ctx: NetContext,
+): Promise<{ items: MediaItem[]; error?: string }> {
+  const params = new URLSearchParams({
+    client_id: key,
+    format: "json",
+    limit: String(limit),
+    search: query,
+    audioformat: "mp32",
+    include: "licenses",
+  });
+  const result = await request<JamendoResponse>(
+    `https://api.jamendo.com/v3.0/tracks/?${params.toString()}`,
+    ctx,
+    { timeoutMs: 9000, retries: 0 },
+  );
+  if (!result.ok) {
+    return { items: [], error: result.error.message };
+  }
+
+  const items: MediaItem[] = [];
+  for (const track of result.data.results ?? []) {
+    const file = track.audiodownload ?? track.audio;
+    if (!file || !track.name) {
+      continue;
+    }
+    items.push(
+      mediaItem({
+        kind: "audio",
+        title: truncate(
+          `${track.name}${track.artist_name ? ` — ${track.artist_name}` : ""}`,
+          140,
+        ),
+        url: file,
+        pageUrl: track.shareurl,
+        thumbnailUrl: track.image,
+        source: JAMENDO_SOURCE.label,
+        sourceId: JAMENDO_SOURCE.id,
+        licence: "Creative Commons — see the licence link on the track page",
+        licenceUrl: track.license_ccurl,
+        author: track.artist_name,
+        artist: track.artist_name,
+        collection: track.album_name,
+        durationMs:
+          typeof track.duration === "number" ? track.duration * 1000 : undefined,
+        mime: "audio/mpeg",
+        query,
+        access: "download",
+      }),
+    );
+  }
+  return { items };
+}
+
+export const audioSearch: SkillDefinition = {
+  id: "audio-search",
+  name: "Music & audio finder",
+  short: "Audio",
+  description:
+    "Finds playable audio without a key — Internet Archive, Wikimedia Commons and Openverse for downloadable tracks with their licences, plus official 30-second catalog previews and store links for released music.",
+  category: "retrieval",
+  runtime: "live",
+  accepts: ["text"],
+  produces: ["audio", "licence"],
+  keywords: AUDIO_KEYWORDS,
+  clientFallback: true,
+  async run(target, ctx) {
+    const skill = "audio-search";
+    const query = queryOf(target);
+    const limit = budget(target);
+    const reusable = reusableOnly(target);
+    ctx.log(`Searching audio sources for “${query}”`);
+
+    const sources: SourceRef[] = [archiveSource(), commonsSource(), openverseSource()];
+    const jamendoKey = ctx.env("JAMENDO_CLIENT_ID");
+    const failures: string[] = [];
+    const items: MediaItem[] = [];
+    let previews = 0;
+
+    const archive = await archiveAudioSearch(query, limit, ctx);
+    items.push(...archive.items);
+    if (archive.error) {
+      failures.push(`Internet Archive: ${archive.error}`);
+    }
+
+    const commons = await commonsSearch(query, "audio", limit, ctx);
+    items.push(...commons.items);
+    if (commons.error) {
+      failures.push(`Wikimedia Commons: ${commons.error}`);
+    }
+
+    const openverse = await openverseAudioSearch(query, limit, reusable, ctx);
+    items.push(...openverse.items);
+    if (openverse.error) {
+      failures.push(`Openverse: ${openverse.error}`);
+    }
+
+    if (jamendoKey) {
+      const jamendo = await jamendoSearch(query, limit, jamendoKey, ctx);
+      items.push(...jamendo.items);
+      if (jamendo.error) {
+        failures.push(`Jamendo: ${jamendo.error}`);
+      } else if (jamendo.items.length > 0) {
+        sources.push(
+          source(JAMENDO_SOURCE.id, JAMENDO_SOURCE.label, JAMENDO_SOURCE.url, "api"),
+        );
+      }
+    }
+
+    const itunes = await itunesSearch(query, limit, ctx);
+    items.push(...itunes.items);
+    previews += itunes.items.length;
+    if (itunes.error) {
+      failures.push(`Apple Music catalog: ${itunes.error}`);
+    }
+
+    const deezer = await deezerSearch(query, limit, ctx);
+    items.push(...deezer.items);
+    previews += deezer.items.length;
+    if (deezer.error) {
+      failures.push(`Deezer catalog: ${deezer.error}`);
+    }
+
+    const filtered = reusable
+      ? items.filter(
+          (item) =>
+            item.access === "preview" ||
+            !/no licence stated|check the item page|all rights reserved/i.test(
+              item.licence ?? "",
+            ),
+        )
+      : items;
+    const deduped = Array.from(
+      new Map(filtered.map((item) => [item.url, item])).values(),
+    );
+    const downloadable = deduped.filter((item) => item.access !== "preview").length;
+
+    const evidenceItems = [
+      evidence(
+        skill,
+        "Tracks found",
+        `${deduped.length} playable result(s) for “${query}”`,
+        {
+          source: sources[0],
+          detail: `${downloadable} downloadable from free libraries, ${deduped.length - downloadable} licensed preview(s) with store links.`,
+        },
+      ),
+      ...licenceRow(skill, deduped, sources),
+    ];
+    if (!jamendoKey) {
+      evidenceItems.push(
+        evidence(skill, "Untapped source", "Jamendo is not configured", {
+          source: sources[0],
+          kind: "record",
+          severity: "low",
+          detail:
+            "A free Jamendo client id in Settings adds a full Creative Commons catalogue of downloadable master files. Its absence is reported rather than worked around.",
+        }),
+      );
+    }
+    if (previews > 0) {
+      evidenceItems.push(
+        evidence(
+          skill,
+          "Preview vs download",
+          `${previews} catalog preview(s) — 30-second excerpts`,
+          {
+            source: sources[2],
+            kind: "record",
+            severity: "low",
+            detail:
+              "Released commercial tracks are previewed from the official catalog APIs and linked to the store. This console does not provide or host full copyrighted recordings — the downloadable results come from the free libraries and carry the licence their uploader stated.",
+          },
+        ),
+      );
+    }
+    if (deduped.length === 0) {
+      evidenceItems.push(
+        evidence(skill, "Audio search", "nothing playable matched", {
+          source: sources[0],
+          kind: "warning",
+          severity: "low",
+          detail:
+            failures.join(" · ") ||
+            "Try the artist, album or film name rather than the full line of a verse.",
+        }),
+      );
+    }
+
+    return resultOutcome({
+      media: deduped,
+      evidence: evidenceItems,
+      sources,
+      status:
+        deduped.length > 0 ? (failures.length > 0 ? "partial" : "ok") : "unreachable",
+      summary:
+        deduped.length > 0
+          ? `${deduped.length} playable track(s) for “${query}” — ${downloadable} downloadable, ${deduped.length - downloadable} preview(s).`
+          : `No audio returned for “${query}”${failures.length ? ` — ${failures[0]}` : ""}.`,
+    });
+  },
+};
+
 export const retrievalSkills: SkillDefinition[] = [
   imageSearch,
   videoSearch,
+  audioSearch,
   newsSearch,
   imageProvenance,
 ];
@@ -2004,6 +2577,7 @@ export const retrievalSkills: SkillDefinition[] = [
 export const retrievalVocabulary = {
   image: IMAGE_KEYWORDS,
   video: VIDEO_KEYWORDS,
+  audio: AUDIO_KEYWORDS,
   news: NEWS_KEYWORDS,
   article: ARTICLE_KEYWORDS,
 };

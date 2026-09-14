@@ -14,7 +14,15 @@ import type {
 } from "@/lib/types";
 import { newId } from "@/lib/utils";
 import { buildPlan } from "./plan";
-import { type AnalysisBundle, assessRisk, deterministicBriefing } from "./synthesize";
+import {
+  type AnalysisBundle,
+  assessRisk,
+  capabilityAnswer,
+  deterministicBriefing,
+  isRetrievalAsk,
+  plainBriefing,
+  retrievalAnswer,
+} from "./synthesize";
 
 export interface RunOptions {
   request: AgentRequest;
@@ -66,6 +74,30 @@ export async function runAnalysis(options: RunOptions): Promise<{
 
   const media: MediaItem[] = [];
   const articles: ArticleItem[] = [];
+
+  if (plan.steps.length === 0) {
+    // Greeting or an empty ask: nothing is searched, and nothing is invented.
+    const bundle: AnalysisBundle = {
+      question: request.message,
+      steps: [],
+      outcomes: [],
+      evidence: [],
+      entities: [],
+      sources: [],
+      rationale: plan.rationale,
+      media: [],
+      articles: [],
+    };
+    const answer = capabilityAnswer(plan.smallTalk);
+    onEvent({ type: "synthesis:done", text: answer, sourceIds: [] });
+    onEvent({
+      type: "turn:done",
+      turnId,
+      finishedAt: Date.now(),
+      stats: { steps: 0, evidence: 0, entities: 0, sources: 0 },
+    });
+    return { bundle, risk: assessRisk(bundle), answer, mode: "analyst" as const };
+  }
 
   const collect = (outcome: SkillOutcome) => {
     for (const item of outcome.evidence) {
@@ -215,7 +247,12 @@ export async function runAnalysis(options: RunOptions): Promise<{
   const risk = assessRisk(bundle);
   onEvent({ type: "risk", risk });
 
-  let answer = deterministicBriefing(bundle, risk);
+  const analyst = request.preferences?.answerStyle === "analyst";
+  let answer = isRetrievalAsk(bundle)
+    ? retrievalAnswer(bundle)
+    : analyst
+      ? deterministicBriefing(bundle, risk)
+      : plainBriefing(bundle, risk);
   let mode: "model" | "analyst" = "analyst";
   let model: string | undefined;
 

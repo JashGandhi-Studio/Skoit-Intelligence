@@ -58,10 +58,32 @@ export function manifest(): SkillManifestEntry[] {
   }));
 }
 
+function escapeForRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Keyword matching has to be word-aware: a plain substring test makes “recipe”
+ * match the keyword “ip” and sends a cooking question to a geolocation skill.
+ * Short keywords must stand alone; longer ones may take an English plural.
+ */
 export function skillsMatchingText(text: string): SkillDefinition[] {
   const lower = text.toLowerCase();
   return allSkills.filter((skill) =>
-    skill.keywords.some((keyword) => lower.includes(keyword.toLowerCase())),
+    skill.keywords.some((keyword) => {
+      const needle = keyword.trim().toLowerCase();
+      if (!needle) {
+        return false;
+      }
+      if (!/^[a-z0-9][a-z0-9\s.'&/-]*$/.test(needle)) {
+        return lower.includes(needle);
+      }
+      const suffix = needle.length >= 4 ? "(?:s|es)?" : "";
+      return new RegExp(
+        `(?:^|[^a-z0-9])${escapeForRegex(needle)}${suffix}(?:[^a-z0-9]|$)`,
+        "i",
+      ).test(lower);
+    }),
   );
 }
 

@@ -265,6 +265,7 @@ export const KEYED_SOURCES = [
   "VIRUSTOTAL_API_KEY",
   // Media libraries: without these the console still searches the keyless
   // Commons / Openverse / NASA / Internet Archive sources.
+  "JAMENDO_CLIENT_ID",
   "PEXELS_API_KEY",
   "PIXABAY_API_KEY",
   "UNSPLASH_ACCESS_KEY",

@@ -3,6 +3,7 @@ import { concurrency, request, source } from "@/lib/net/http";
 import { attrs, entity, evidence as makeEvidence } from "@/lib/skills/emit";
 import { normalizeDomain } from "@/lib/skills/identify";
 import type { Evidence, SkillDefinition } from "@/lib/types";
+import { truncate } from "@/lib/utils";
 
 /* --------------------------- URL dissection ---------------------------- */
 
@@ -1106,6 +1107,238 @@ export const hostResolutionSweep: SkillDefinition = {
   },
 };
 
+/* --------------------------- Encyclopaedia ---------------------------- */
+
+const WIKI_LANGUAGES = new Set([
+  "en",
+  "hi",
+  "mr",
+  "ta",
+  "te",
+  "bn",
+  "gu",
+  "kn",
+  "ml",
+  "pa",
+  "ur",
+  "ne",
+  "as",
+  "or",
+  "sa",
+]);
+
+interface WikiSearchResponse {
+  query?: {
+    search?: Array<{
+      title?: string;
+      snippet?: string;
+      wordcount?: number;
+      timestamp?: string;
+    }>;
+  };
+}
+
+interface WikiSummaryResponse {
+  title?: string;
+  description?: string;
+  extract?: string;
+  timestamp?: string;
+  content_urls?: { desktop?: { page?: string } };
+}
+
+function plainText(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&#0?39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Keyless encyclopaedia lookup. It exists so a plain question — "who is the
+ * chief minister of Maharashtra", "what is a UPI mandate" — gets a real sourced
+ * answer instead of being forced through an investigation that has nothing to
+ * investigate. Wikipedia is labelled as what it is: useful for orientation and
+ * terminology, crowd-edited, never a primary source.
+ */
+export const encyclopediaLookup: SkillDefinition = {
+  id: "encyclopedia",
+  name: "Encyclopaedia lookup",
+  short: "Encyclopaedia",
+  description:
+    "Searches Wikipedia in the language of the question and reads the matching article's summary, with the licence and the attribution that reuse requires. Crowd-edited reference material, presented as such.",
+  category: "knowledge",
+  runtime: "live",
+  accepts: ["text", "person", "organisation"],
+  produces: ["summary", "citation"],
+  keywords: [
+    "wiki",
+    "wikipedia",
+    "encyclopedia",
+    "encyclopaedia",
+    "who is",
+    "who was",
+    "what is",
+    "what was",
+    "meaning of",
+    "definition of",
+    "history of",
+    "biography",
+    "born in",
+    "kya hai",
+    "kaun hai",
+    "jankari",
+    "ke bare mein",
+    "bare mein",
+  ],
+  clientFallback: true,
+  async run(target, ctx) {
+    const skill = "encyclopedia";
+    const query = (target.meta?.query?.trim() || target.value).trim();
+    const requested = (target.meta?.language ?? "en").slice(0, 2).toLowerCase();
+    const code = WIKI_LANGUAGES.has(requested) ? requested : "en";
+    const searchSrc = source(
+      "wikipedia:search",
+      `Wikipedia (${code}) search`,
+      `https://${code}.wikipedia.org/w/api.php`,
+      "dataset",
+    );
+    ctx.log(`Reading the encyclopaedia entry for “${query}”`);
+
+    const search = await request<WikiSearchResponse>(
+      `https://${code}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=5&format=json&origin=*`,
+      ctx,
+      { timeoutMs: 9000, retries: 0 },
+    );
+    if (!search.ok) {
+      return {
+        status: search.error.code === "egress_blocked" ? "unreachable" : "error",
+        summary: `Wikipedia could not be reached: ${search.error.message}`,
+        evidence: [],
+        entities: [],
+        sources: [searchSrc],
+        error: search.error,
+      };
+    }
+
+    const hits = search.data.query?.search ?? [];
+    const title = hits[0]?.title;
+    if (!title) {
+      return {
+        status: "ok",
+        summary: `No encyclopaedia article matched “${query}”.`,
+        evidence: [
+          makeEvidence(skill, "Encyclopaedia", "no article matched", {
+            source: searchSrc,
+            kind: "warning",
+            severity: "low",
+            detail:
+              "No Wikipedia article matched this wording. That is not evidence about the subject either way — try a name, a place or a term rather than a whole sentence.",
+          }),
+        ],
+        entities: [],
+        sources: [searchSrc],
+      };
+    }
+
+    const articleUrl = `https://${code}.wikipedia.org/wiki/${encodeURIComponent(title)}`;
+    const articleSrc = source(
+      "wikipedia:article",
+      `Wikipedia — ${title}`,
+      articleUrl,
+      "document",
+    );
+    const summary = await request<WikiSummaryResponse>(
+      `https://${code}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}?redirect=true`,
+      ctx,
+      { timeoutMs: 9000, retries: 0 },
+    );
+
+    const evidenceItems: Evidence[] = [];
+    let lede = false;
+    if (summary.ok && summary.data.extract) {
+      lede = true;
+      evidenceItems.push(
+        makeEvidence(
+          skill,
+          "Article summary",
+          truncate(summary.data.description || title, 160),
+          {
+            source: articleSrc,
+            kind: "reference",
+            confidence: "confirmed",
+            detail: truncate(summary.data.extract, 700),
+            raw: { title, url: articleUrl },
+          },
+        ),
+      );
+      if (summary.data.timestamp) {
+        evidenceItems.push(
+          makeEvidence(
+            skill,
+            "Last edited",
+            new Date(summary.data.timestamp).toISOString().slice(0, 10),
+            { source: articleSrc, confidence: "confirmed" },
+          ),
+        );
+      }
+    }
+
+    for (const hit of hits.slice(1, 5)) {
+      if (!hit.title) {
+        continue;
+      }
+      evidenceItems.push(
+        makeEvidence(skill, "Also covered", truncate(hit.title, 120), {
+          source: source(
+            "wikipedia:article",
+            `Wikipedia — ${hit.title}`,
+            `https://${code}.wikipedia.org/wiki/${encodeURIComponent(hit.title)}`,
+            "document",
+          ),
+          kind: "reference",
+          confidence: "probable",
+          detail: plainText(hit.snippet)?.slice(0, 240),
+        }),
+      );
+    }
+
+    evidenceItems.push(
+      makeEvidence(
+        skill,
+        "Licence",
+        "Wikipedia text: CC BY-SA 4.0 or CC0 — attribution required when you reuse it",
+        { source: articleSrc, confidence: "confirmed" },
+      ),
+    );
+    evidenceItems.push(
+      makeEvidence(skill, "Source type", "Crowd-edited encyclopaedia", {
+        source: articleSrc,
+        kind: "warning",
+        severity: "low",
+        detail:
+          "Useful for orientation, terminology and dates, but user-edited: cite the article and follow its own references before relying on a contested claim.",
+      }),
+    );
+
+    return {
+      status: lede ? "ok" : "partial",
+      summary: lede
+        ? `Read the entry for “${title}” plus ${Math.max(0, Math.min(hits.length, 5) - 1)} related article(s).`
+        : `Found ${hits.length} related article(s) for “${query}” but no readable summary.`,
+      evidence: evidenceItems,
+      entities: [],
+      sources: [searchSrc, articleSrc],
+    };
+  },
+};
+
 export const knowledgeSkills: SkillDefinition[] = [
   urlStructure,
   archiveHistory,
@@ -1113,4 +1346,5 @@ export const knowledgeSkills: SkillDefinition[] = [
   referenceLab,
   hostResolutionSweep,
   webSearch,
+  encyclopediaLookup,
 ];

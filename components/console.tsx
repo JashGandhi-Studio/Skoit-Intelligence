@@ -38,6 +38,7 @@ import {
   toCaseTurn,
   useCases,
 } from "@/lib/client/cases";
+import { writeWithFreeModel } from "@/lib/client/free-model";
 import { fetchStoredPreferences, loadLocalPreferences } from "@/lib/client/preferences";
 import { runClientPass } from "@/lib/client/runner";
 import { getSkill, manifest } from "@/lib/skills";
@@ -473,7 +474,13 @@ export function Console() {
                     phase: "done",
                     finishedAt: item.finishedAt ?? Date.now(),
                     risk: mergedRisk,
-                    answer: mergedAnswer(settled, bundle, mergedRisk, evidenceBeforePass),
+                    answer: mergedAnswer(
+                      settled,
+                      bundle,
+                      mergedRisk,
+                      evidenceBeforePass,
+                      preferences.answerStyle ?? "plain",
+                    ),
                     answerMode: settled.answer
                       ? (item.answerMode ?? "analyst")
                       : "analyst",
@@ -487,6 +494,58 @@ export function Console() {
                 : item,
             ),
           );
+        }
+      }
+
+      // Free model pass — only when the analyst asked for a model, no keyed model
+      // wrote this run, and there is real evidence to write up. The script loads
+      // lazily and any failure leaves the built-in answer standing.
+      const written = await new Promise<TurnView | null>((resolve) => {
+        setTurns((current) => {
+          resolve(current.find((item) => item.id === turn.id) ?? null);
+          return current;
+        });
+      });
+
+      if (
+        written &&
+        preferences.ai !== "off" &&
+        written.answerMode !== "model" &&
+        written.evidence.length > 0 &&
+        !controller.signal.aborted
+      ) {
+        const freeBundle = bundleFromTurn(written);
+        const free = await writeWithFreeModel(
+          freeBundle,
+          assessRisk(freeBundle),
+          preferences.answerStyle ?? "plain",
+          controller.signal,
+        );
+        if (free.text) {
+          setTurns((current) =>
+            current.map((item) =>
+              item.id === turn.id
+                ? {
+                    ...item,
+                    answer: free.text as string,
+                    answerMode: "model",
+                    model: "free browser model",
+                  }
+                : item,
+            ),
+          );
+          patchTurn(turn.id, {
+            type: "notice",
+            level: "info",
+            message:
+              "Briefing written by the free browser model over the collected evidence — sources and findings are unchanged.",
+          });
+        } else if (free.error) {
+          patchTurn(turn.id, {
+            type: "notice",
+            level: "info",
+            message: `Built-in writer used — ${free.error}.`,
+          });
         }
       }
 
@@ -871,9 +930,9 @@ export function Console() {
                         </button>
                         {noticeOpen ? (
                           <ul className="space-y-1 border-t border-hairline px-3.5 py-2.5">
-                            {turn.notices.map((notice) => (
+                            {turn.notices.map((notice, noticeIndex) => (
                               <li
-                                key={`${notice.level}-${notice.message}`}
+                                key={`${turn.id}-notice-${noticeIndex}-${notice.level}`}
                                 className={cn(
                                   "text-[12px] leading-relaxed",
                                   notice.level === "error"

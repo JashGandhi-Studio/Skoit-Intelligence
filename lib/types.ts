@@ -107,9 +107,12 @@ export interface SkillError {
 /** A licence-clear image or video returned by a retrieval skill. */
 export interface MediaItem {
   id: string;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   title: string;
-  /** Direct asset URL — safe to use in an img/video tag and to download. */
+  /**
+   * Direct asset URL — safe to play in the matching media element. For
+   * `access: "preview"` this is a licensed short clip, not the full work.
+   */
   url: string;
   /** Landing page that documents the asset, its author and its licence. */
   pageUrl?: string;
@@ -126,6 +129,17 @@ export interface MediaItem {
   mime?: string;
   publishedAt?: number;
   query?: string;
+  /** preview = a licensed excerpt (30s catalog clips); download = the full file. */
+  access?: "download" | "preview";
+  /** Album or collection the track belongs to, when the source states one. */
+  collection?: string;
+  /** Performer, when the source states one. */
+  artist?: string;
+  /** True when the playable URL is an official excerpt rather than the work. */
+  previewOnly?: boolean;
+  /** Where the full commercial release can be bought or streamed. */
+  storeName?: string;
+  storeUrl?: string;
 }
 
 /**
@@ -154,20 +168,38 @@ export interface ArticleItem {
 export interface AnswerPreferences {
   /** focused = answer exactly what was asked; deep = collect everything relevant. */
   focus: "focused" | "standard" | "deep";
-  media: { images: boolean; videos: boolean; articles: boolean; news: boolean };
+  media: {
+    images: boolean;
+    videos: boolean;
+    audio: boolean;
+    articles: boolean;
+    news: boolean;
+  };
   /** reusable = commercial-use / public-domain style licences only. */
   licence: "any" | "reusable";
   /** Results requested per source, per pass. */
   perSource: number;
   language?: string;
   region?: string;
+  /**
+   * Where written briefings come from: your own keys when they exist, otherwise
+   * a free in-browser model — off keeps everything deterministic.
+   */
+  ai?: "auto" | "off";
+  /**
+   * Plain answers a general reader can act on; analyst keeps the structured
+   * OSINT briefing with its risk read and coverage table.
+   */
+  answerStyle?: "plain" | "analyst";
 }
 
 export const DEFAULT_ANSWER_PREFERENCES: AnswerPreferences = {
   focus: "focused",
-  media: { images: true, videos: true, articles: true, news: true },
+  media: { images: true, videos: true, audio: true, articles: true, news: true },
   licence: "reusable",
   perSource: 8,
+  ai: "auto",
+  answerStyle: "plain",
 };
 
 export interface SkillOutcome {

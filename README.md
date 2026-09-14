@@ -4,7 +4,7 @@ A working open-source-intelligence workbench that runs on your own machine. It c
 public sources, shows exactly what it could **not** verify, scores the gaps as well as the findings,
 and saves every run as a case file you own.
 
-No accounts. No cloud database. No telemetry. 33 skills — 22 live against public endpoints, 11 offline
+No accounts. No cloud database. No telemetry. 35 skills — 24 live against public endpoints, 11 offline
 validators — and one rule enforced throughout: **nothing is asserted that was not collected.**
 
 ```
@@ -54,6 +54,8 @@ refusal to infer caste, religion or community)
 
 **Comms** — `phone-intelligence` (libphonenumber: country, line type, VoIP flag) ·
 `pincode-intelligence` (PIN circles and states, live delivery-office data when reachable) ·
+`encyclopedia` (keyless Wikipedia lookup in the language of the question, licence and attribution stated) ·
+`audio-search` (Internet Archive, Wikimedia Commons and Openverse for downloadable audio; Jamendo in full with a free client id; official 30-second catalogue previews with store links for released music) ·
 `vehicle-registration` (state, RTO zone, series decode — plus a plain statement that owner data is not
 publicly obtainable)
 
@@ -108,6 +110,12 @@ This is the part that matters, and it is structural rather than a prompt instruc
 - When a model is configured it receives the evidence JSON and is instructed to cite collected sources
   and to never add facts of its own; an empty or failed model response falls back to the deterministic
   write-up with a warning. With no model configured, briefings are deterministic and fully functional.
+- **Two registers, one set of evidence.** *Plain* (the default) writes for a general reader with the
+  technical terms kept and explained; *Analyst* writes the structured dossier with the coverage table and
+  risk factors. Both render exactly the evidence that was collected.
+- **The free browser model is opt-in.** With no key of your own, `ai: "auto"` may load Puter.js in the
+  browser and let a free model write the briefing over the collected evidence only. `ai: "off"` never
+  loads it. If the script cannot load, the built-in writer answers and the run says why.
 - The console shows whether the **server** has egress. When it does not, the browser becomes the
   collection path for CORS-capable public endpoints, and the merged result is re-scored and rewritten
   with a labelled addendum — never silently blended.
@@ -134,6 +142,12 @@ reports presence only).
 | Briefing models | `SARVAM_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `COMPATIBLE_BASE_URL` (local Ollama/LM Studio, loopback only) |
 | Keyed sources | `HIBP_API_KEY`, `SEARCH_API_KEY`, `OPENSANCTIONS_API_KEY`, `VIRUSTOTAL_API_KEY` |
 | Keyed media libraries | `PEXELS_API_KEY`, `PIXABAY_API_KEY`, `UNSPLASH_ACCESS_KEY` |
+| Keyed music library | `JAMENDO_CLIENT_ID` (free) — full Creative Commons tracks as downloadable files |
+
+Song requests are answered with something you can actually use: full files with their licence from
+Internet Archive, Wikimedia Commons, Openverse and (when keyed) Jamendo, played in place and linked for
+download; released commercial recordings come back as the store's own 30-second preview with a link to
+buy or stream the whole thing. Nothing is rehosted and no copyright is bypassed.
 
 Images support Sarvam (`sarvam-m`), OpenAI, Anthropic, Google Gemini and any OpenAI-compatible local
 server; `SKOIT_MODEL_PROVIDER` forces a choice and `<PROVIDER>_MODEL` overrides the default. Model calls

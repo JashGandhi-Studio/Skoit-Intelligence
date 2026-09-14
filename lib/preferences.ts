@@ -16,6 +16,9 @@ export function sanitizePreferences(input: unknown): AnswerPreferences {
   const focus =
     raw.focus === "standard" || raw.focus === "deep" ? raw.focus : ("focused" as const);
   const licence = raw.licence === "any" ? ("any" as const) : ("reusable" as const);
+  const ai = raw.ai === "off" ? ("off" as const) : ("auto" as const);
+  const answerStyle =
+    raw.answerStyle === "analyst" ? ("analyst" as const) : ("plain" as const);
   const perSourceRaw = Number(raw.perSource);
   const perSource = Number.isFinite(perSourceRaw)
     ? Math.min(24, Math.max(3, Math.round(perSourceRaw)))
@@ -24,10 +27,13 @@ export function sanitizePreferences(input: unknown): AnswerPreferences {
   return {
     focus,
     licence,
+    ai,
+    answerStyle,
     perSource,
     media: {
       images: raw.media?.images !== false,
       videos: raw.media?.videos !== false,
+      audio: raw.media?.audio !== false,
       articles: raw.media?.articles !== false,
       news: raw.media?.news !== false,
     },

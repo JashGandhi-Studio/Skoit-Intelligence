@@ -7,9 +7,11 @@ import {
   Images,
   KeyRound,
   Loader2,
+  Music2,
   Newspaper,
   Server,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Video,
 } from "lucide-react";
@@ -66,6 +68,7 @@ const KEY_LABELS: Record<string, string> = {
   SEARCH_API_KEY: "Brave Search — open-web and news queries",
   OPENSANCTIONS_API_KEY: "OpenSanctions — sanctions and PEP screening",
   VIRUSTOTAL_API_KEY: "VirusTotal — hash reputation",
+  JAMENDO_CLIENT_ID: "Jamendo — free Creative Commons music, downloadable in full",
   PEXELS_API_KEY: "Pexels — free stock photos and video clips",
   PIXABAY_API_KEY: "Pixabay — free images, video and B-roll",
   UNSPLASH_ACCESS_KEY: "Unsplash — free photography",
@@ -101,6 +104,12 @@ const MEDIA_TOGGLES: Array<{
   { key: "images", label: "Images", hint: "Photos, illustrations, stock", icon: Images },
   { key: "videos", label: "Video & B-roll", hint: "Footage and clips", icon: Video },
   {
+    key: "audio",
+    label: "Music & audio",
+    hint: "Songs, recordings, official previews",
+    icon: Music2,
+  },
+  {
     key: "articles",
     label: "Articles",
     hint: "Writing, explainers, papers",
@@ -111,6 +120,48 @@ const MEDIA_TOGGLES: Array<{
     label: "Latest news",
     hint: "Recent reporting, verified",
     icon: Newspaper,
+  },
+];
+
+const STYLE_COPY: Array<{
+  key: NonNullable<AnswerPreferences["answerStyle"]>;
+  label: string;
+  blurb: string;
+  detail: string;
+}> = [
+  {
+    key: "plain",
+    label: "Plain",
+    blurb: "Anyone can read it",
+    detail:
+      "Short sentences, the technical term kept and explained, and what to do with the finding. Default.",
+  },
+  {
+    key: "analyst",
+    label: "Analyst",
+    blurb: "Full dossier",
+    detail:
+      "Structured briefing with a coverage table, risk factors and confidence marked on every claim.",
+  },
+];
+
+const AI_COPY: Array<{
+  key: NonNullable<AnswerPreferences["ai"]>;
+  label: string;
+  hint: string;
+  icon: typeof Sparkles;
+}> = [
+  {
+    key: "auto",
+    label: "Best available model",
+    hint: "Your own key if you have one; otherwise the free in-browser model (Puter.js) writes over the same evidence. Neither → built-in writer, and it says so.",
+    icon: Sparkles,
+  },
+  {
+    key: "off",
+    label: "Built-in writer only",
+    hint: "Nothing but the evidence leaves this machine — no model call at all.",
+    icon: Server,
   },
 ];
 
@@ -391,6 +442,87 @@ export function SettingsDialog({
                     </div>
                   </div>
                 </div>
+              </section>
+              <section>
+                <p className="text-[12.5px] font-medium text-foreground">
+                  How the answer is written
+                </p>
+                <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                  Both styles use the same collected evidence. Nothing is written that a
+                  source did not return.
+                </p>
+                <div className="mt-2.5 grid grid-cols-2 gap-2">
+                  {STYLE_COPY.map(({ key, label, blurb, detail }) => {
+                    const active = (preferences.answerStyle ?? "plain") === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => void patchPreferences({ answerStyle: key })}
+                        className={cn(
+                          "rounded-xl border px-3 py-2.5 text-left transition-colors",
+                          active
+                            ? "border-primary/45 bg-primary-soft"
+                            : "border-hairline bg-surface hover:bg-surface-2",
+                        )}
+                      >
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-[12.5px] font-medium text-foreground">
+                            {label}
+                          </span>
+                          {active ? (
+                            <Badge tone="primary" mono>
+                              on
+                            </Badge>
+                          ) : null}
+                        </span>
+                        <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                          {blurb}
+                        </span>
+                        <span className="mt-1.5 block text-[11px] leading-relaxed text-faint-foreground">
+                          {detail}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section>
+                <p className="text-[12.5px] font-medium text-foreground">
+                  Who writes the briefing
+                </p>
+                <ul className="mt-2.5 space-y-2">
+                  {AI_COPY.map(({ key, label, hint, icon: Icon }) => {
+                    const active = (preferences.ai ?? "auto") === key;
+                    return (
+                      <li
+                        key={key}
+                        className={cn(
+                          "flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition-colors",
+                          active
+                            ? "border-primary/45 bg-primary-soft"
+                            : "border-hairline bg-surface",
+                        )}
+                      >
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <Icon className="size-4 shrink-0 text-faint-foreground" />
+                          <div className="min-w-0">
+                            <p className="text-[12.5px] text-foreground">{label}</p>
+                            <p className="text-[11px] text-muted-foreground">{hint}</p>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={active ? "primary" : "outline"}
+                          onClick={() => void patchPreferences({ ai: key })}
+                        >
+                          {active ? "in use" : "use"}
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
               </section>
             </div>
           </TabContent>
