@@ -55,6 +55,11 @@ import { cn, formatDuration } from "@/lib/utils";
 
 const STARTERS = [
   {
+    label: "Song & audio",
+    prompt:
+      "Play me the song Kesariya — and give me the download link if it is free to use.",
+  },
+  {
     label: "B-roll search",
     prompt:
       "Find me licence-free B-roll video of Mumbai local trains for a documentary edit.",
