@@ -18,6 +18,7 @@ import {
   type AnalysisBundle,
   assessRisk,
   capabilityAnswer,
+  countryAskAnswer,
   deterministicBriefing,
   isRetrievalAsk,
   plainBriefing,
@@ -76,7 +77,8 @@ export async function runAnalysis(options: RunOptions): Promise<{
   const articles: ArticleItem[] = [];
 
   if (plan.steps.length === 0) {
-    // Greeting or an empty ask: nothing is searched, and nothing is invented.
+    // Greeting, a country question, or an empty ask: nothing is searched, and
+    // nothing is invented.
     const bundle: AnalysisBundle = {
       question: request.message,
       steps: [],
@@ -88,7 +90,9 @@ export async function runAnalysis(options: RunOptions): Promise<{
       media: [],
       articles: [],
     };
-    const answer = capabilityAnswer(plan.smallTalk);
+    const answer = plan.countryAsk
+      ? countryAskAnswer()
+      : capabilityAnswer(plan.smallTalk, { name: request.preferences?.userName });
     onEvent({ type: "synthesis:done", text: answer, sourceIds: [] });
     onEvent({
       type: "turn:done",

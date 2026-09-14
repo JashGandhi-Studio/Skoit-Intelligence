@@ -19,9 +19,17 @@ export const maxDuration = 120;
 
 const EGRESS_PROBE_URL = "https://api.github.com/rate_limit";
 
+// The probe is cached: planning must not wait on a network round-trip every
+// turn — the first answer's plan chips should paint well under two seconds.
+const PROBE_TTL_MS = 45_000;
+let egressCache: { value: boolean; at: number } | null = null;
+
 async function probeEgress(signal: AbortSignal): Promise<boolean> {
+  if (egressCache && Date.now() - egressCache.at < PROBE_TTL_MS) {
+    return egressCache.value;
+  }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4000);
+  const timer = setTimeout(() => controller.abort(), 1500);
   signal.addEventListener("abort", () => controller.abort(), { once: true });
   try {
     const response = await fetch(EGRESS_PROBE_URL, {
@@ -29,8 +37,11 @@ async function probeEgress(signal: AbortSignal): Promise<boolean> {
       cache: "no-store",
       headers: { accept: "application/json" },
     });
-    return response.ok;
+    const value = response.ok;
+    egressCache = { value, at: Date.now() };
+    return value;
   } catch {
+    egressCache = { value: false, at: Date.now() };
     return false;
   } finally {
     clearTimeout(timer);

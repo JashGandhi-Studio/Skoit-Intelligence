@@ -2,6 +2,7 @@
 
 import {
   ChevronDown,
+  Globe2,
   Info,
   Menu,
   Moon,
@@ -13,16 +14,35 @@ import {
   WifiOff,
   Wrench,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Briefing } from "@/components/console/briefing";
 import { CaseSidebar } from "@/components/console/case-sidebar";
 import { Composer, type ComposerSubmission } from "@/components/console/composer";
+import { Guide } from "@/components/console/guide";
+import { ForwardVerdictCard, QuickCards } from "@/components/console/insights";
 import { IntelPanel } from "@/components/console/intel-panel";
 import { PlanCard } from "@/components/console/plan-card";
 import { ResultsGallery } from "@/components/console/results-gallery";
 import { SettingsDialog } from "@/components/console/settings";
 import { StepCard } from "@/components/console/step-card";
+import { ViewerDialog, type ViewerRequest } from "@/components/console/viewers";
+import { DocumentWorkshop } from "@/components/studio/document-workshop";
+
+const MapExplorer = dynamic(
+  () => import("@/components/studio/map-explorer").then((mod) => mod.MapExplorer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center text-[12px] text-muted-foreground">
+        Loading the globe…
+      </div>
+    ),
+  },
+);
+
+import { QrStudio } from "@/components/studio/qr-studio";
 import { useTheme } from "@/components/theme-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,8 +59,13 @@ import {
   useCases,
 } from "@/lib/client/cases";
 import { writeWithFreeModel } from "@/lib/client/free-model";
-import { fetchStoredPreferences, loadLocalPreferences } from "@/lib/client/preferences";
+import {
+  fetchStoredPreferences,
+  loadLocalPreferences,
+  persistPreferences,
+} from "@/lib/client/preferences";
 import { runClientPass } from "@/lib/client/runner";
+import { detectCountryStatement } from "@/lib/news-editions";
 import { getSkill, manifest } from "@/lib/skills";
 import { detectTargets } from "@/lib/skills/identify";
 import type {
@@ -55,52 +80,58 @@ import { cn, formatDuration } from "@/lib/utils";
 
 const STARTERS = [
   {
-    label: "Song & audio",
-    prompt:
-      "Play me the song Kesariya — and give me the download link if it is free to use.",
-  },
-  {
-    label: "B-roll search",
-    prompt:
-      "Find me licence-free B-roll video of Mumbai local trains for a documentary edit.",
-  },
-  {
-    label: "Image find",
-    prompt: "Find reusable images of Charminar, Hyderabad for a poster.",
+    label: "Play a song",
+    prompt: "Play the song Kesariya by Arijit Singh",
   },
   {
     label: "Latest news",
+    prompt: "Show the latest news",
+  },
+  {
+    label: "Mumbai news",
+    prompt: "Mumbai news today",
+  },
+  {
+    label: "Where is the Taj Mahal",
+    prompt: "Where is the Taj Mahal",
+  },
+  {
+    label: "Check a forward",
     prompt:
-      "What is the latest reporting on air quality in Delhi — and is it corroborated?",
+      "Check this forward: RBI is giving every citizen ₹5 lakh under the new deposit scheme, forwarded as received",
+  },
+  {
+    label: "Watch a video",
+    prompt: "Videos of Chandrayaan 3 landing",
+  },
+  {
+    label: "Exam paper",
+    prompt: "ICSE class 10 physics specimen paper",
+  },
+  {
+    label: "Find images",
+    prompt: "Find photos of Charminar at dusk",
+  },
+  {
+    label: "Study material",
+    prompt: "Study material for class 10 science chapter electricity",
+  },
+  {
+    label: "Find websites",
+    prompt: "Good free websites for AI image prompts",
+  },
+  {
+    label: "Compare prices",
+    prompt: "https://www.amazon.in/dp/B0CHX1W1XY — find the lowest price for this",
+  },
+  {
+    label: "Summarise a link",
+    prompt: "Summarise this article: https://en.wikipedia.org/wiki/Chandrayaan-3",
   },
   {
     label: "Domain posture",
     prompt:
       "Assess example.com: registration age, mail spoofing posture, certificate transparency subdomains and lookalike domains.",
-  },
-  {
-    label: "Address triage",
-    prompt:
-      "What is 8.8.8.8 — network owner, geolocation, passive scan noise and reverse DNS?",
-  },
-  {
-    label: "India PIN",
-    prompt: "411001 — which state, district and delivery offices does this PIN cover?",
-  },
-  {
-    label: "Plate decode",
-    prompt:
-      "MH12AB1234 — decode the state, RTO zone and explain what is and is not legally obtainable.",
-  },
-  {
-    label: "Handle footprint",
-    prompt:
-      "Find what public platforms the handle @torvalds has profiles on, and what those profiles expose.",
-  },
-  {
-    label: "Link dissection",
-    prompt:
-      "Dissect this link before anything touches it: http://sbi-online-kyc.verify-login.top/account/update",
   },
 ];
 
@@ -171,6 +202,14 @@ export function Console() {
   const [mobileIntel, setMobileIntel] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [workshopOpen, setWorkshopOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [mapQuery, setMapQuery] = useState("");
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [viewer, setViewer] = useState<{ request: ViewerRequest; open: boolean } | null>(
+    null,
+  );
   const [preferences, setPreferences] = useState<AnswerPreferences>(
     DEFAULT_ANSWER_PREFERENCES,
   );
@@ -267,6 +306,53 @@ export function Console() {
     [updateCase],
   );
 
+  const openViewer = useCallback((request: ViewerRequest) => {
+    setViewer({ request, open: true });
+  }, []);
+
+  // The console remembers who it is working for: a name (for greetings) and a
+  // news country (so “latest news” means *your* latest news). Both stated in
+  // plain language are captured here and stored with the other preferences.
+  const captureProfile = useCallback(
+    (message: string, current: AnswerPreferences): AnswerPreferences => {
+      const next = { ...current };
+      let changed = false;
+
+      const country = detectCountryStatement(message);
+      if (
+        country &&
+        country.code !== current.country &&
+        /news|headline|i am from|i'm from|my country|country is|set.*news|use.*news/i.test(
+          message,
+        )
+      ) {
+        next.country = country.code;
+        changed = true;
+        toast.success(`News country set to ${country.label}`, {
+          description:
+            "Every “latest news” ask now follows it. Say “news from <country>” to switch.",
+        });
+      }
+
+      const nameMatch =
+        /\b(?:my name is|i am|i'm|call me)\s+([A-Z][a-zA-Z.'-]{1,24}(?:\s+[A-Z][a-zA-Z.'-]{1,24})?)\b/.exec(
+          message,
+        );
+      if (nameMatch && !next.userName) {
+        next.userName = nameMatch[1].trim().slice(0, 40);
+        changed = true;
+        toast.success(`Nice to meet you, ${next.userName}`);
+      }
+
+      if (changed) {
+        setPreferences(next);
+        void persistPreferences(next);
+      }
+      return changed ? next : current;
+    },
+    [],
+  );
+
   const run = useCallback(
     async (submission: ComposerSubmission) => {
       const caseFile =
@@ -276,6 +362,7 @@ export function Console() {
       }
 
       const question = submission.message;
+      const effectivePreferences = captureProfile(question, preferences);
       const turn: TurnView = {
         id: `turn_${Date.now().toString(36)}`,
         question,
@@ -307,7 +394,7 @@ export function Console() {
 
       const request: AgentRequest = {
         message: question,
-        preferences,
+        preferences: effectivePreferences,
         skillIds: submission.skillIds,
         attachments: submission.attachments?.map(
           ({ previewUrl: _previewUrl, ...rest }) => rest,
@@ -568,7 +655,17 @@ export function Console() {
         persistTurn(caseFile.id, finished);
       }
     },
-    [active, createCase, patchTurn, persistTurn, skills, turns, updateCase, preferences],
+    [
+      active,
+      captureProfile,
+      createCase,
+      patchTurn,
+      persistTurn,
+      skills,
+      turns,
+      updateCase,
+      preferences,
+    ],
   );
 
   const stop = useCallback(() => {
@@ -581,6 +678,33 @@ export function Console() {
   const activeTurn = turns[turns.length - 1] ?? null;
   const notices = turns.flatMap((turn) => turn.notices);
   const lastNotice = notices[notices.length - 1];
+
+  const openMap = useCallback((place?: string) => {
+    setMapQuery(place ?? "");
+    setMapOpen(true);
+  }, []);
+
+  // Quick-prompt chips inside briefings (country pickers and friends) start a
+  // new run without the analyst retyping anything. Map asks never round-trip
+  // through the planner — the globe opens the same instant.
+  const runPrompt = useCallback(
+    (prompt: string) => {
+      const trimmed = prompt.trim();
+      if (/^open (?:the )?map\b/i.test(trimmed)) {
+        openMap();
+        return;
+      }
+      const mapAsk = trimmed.match(
+        /\b(?:where is|where's|map of|locate|show me a map of)\s+(.{2,80}?)(?:\s+on\s+a\s+map)?\??$/i,
+      );
+      if (mapAsk) {
+        openMap(mapAsk[1].replace(/[?!.]+$/, "").trim());
+        return;
+      }
+      void run({ message: prompt });
+    },
+    [openMap, run],
+  );
 
   if (!hydrated) {
     return (
@@ -638,6 +762,10 @@ export function Console() {
           }
           onImport={importCase}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenWorkshop={() => setWorkshopOpen(true)}
+          onOpenQr={() => setQrOpen(true)}
+          onOpenMap={() => openMap()}
+          onOpenGuide={() => setGuideOpen(true)}
           egress={egress}
           skillCount={skills.length}
         />
@@ -682,6 +810,22 @@ export function Console() {
                       setMobileNav(false);
                       // Let the nav sheet finish closing before the dialog opens.
                       window.setTimeout(() => setSettingsOpen(true), 120);
+                    }}
+                    onOpenWorkshop={() => {
+                      setMobileNav(false);
+                      window.setTimeout(() => setWorkshopOpen(true), 120);
+                    }}
+                    onOpenQr={() => {
+                      setMobileNav(false);
+                      window.setTimeout(() => setQrOpen(true), 120);
+                    }}
+                    onOpenMap={() => {
+                      setMobileNav(false);
+                      window.setTimeout(() => openMap(), 120);
+                    }}
+                    onOpenGuide={() => {
+                      setMobileNav(false);
+                      window.setTimeout(() => setGuideOpen(true), 120);
                     }}
                     egress={egress}
                     skillCount={skills.length}
@@ -832,7 +976,7 @@ export function Console() {
                     answer, and unreachable sources count against the risk score instead
                     of disappearing.
                   </p>
-                  <div className="mt-4 flex flex-wrap gap-1.5">
+                  <div className="mt-4 flex flex-wrap items-center gap-1.5">
                     {[
                       "India-first",
                       "mobile-ready",
@@ -845,13 +989,38 @@ export function Console() {
                       </Badge>
                     ))}
                   </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => setGuideOpen(true)}
+                    >
+                      See everything SkOiT can do
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setWorkshopOpen(true)}
+                    >
+                      <span className="hidden sm:inline">Open the Document Workshop</span>
+                      <span className="sm:hidden">Documents</span>
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setQrOpen(true)}>
+                      <span className="hidden sm:inline">Open the QR Studio</span>
+                      <span className="sm:hidden">QR</span>
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => openMap()}>
+                      <span className="hidden sm:inline">Open the Map & Globe</span>
+                      <span className="sm:hidden">Map</span>
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="mt-5">
                   <p className="mb-2 text-[11px] font-medium tracking-wide text-faint-foreground uppercase">
                     Try one of these
                   </p>
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="stagger grid gap-2 sm:grid-cols-2">
                     {STARTERS.map((starter) => (
                       <button
                         key={starter.label}
@@ -956,11 +1125,23 @@ export function Console() {
                     ) : null}
 
                     {(turn.media.length > 0 || turn.articles.length > 0) && (
-                      <ResultsGallery media={turn.media} articles={turn.articles} />
+                      <ResultsGallery
+                        media={turn.media}
+                        articles={turn.articles}
+                        onOpenViewer={openViewer}
+                      />
                     )}
 
+                    <ForwardVerdictCard evidence={turn.evidence} />
+                    <QuickCards turn={turn} />
+
                     {turn.answer ? (
-                      <Briefing turn={turn} caseTitle={active?.title ?? "case"} />
+                      <Briefing
+                        allowFreeAi={preferences.ai !== "off"}
+                        turn={turn}
+                        caseTitle={active?.title ?? "case"}
+                        onQuickPrompt={runPrompt}
+                      />
                     ) : turn.phase === "done" ? (
                       <div className="rounded-xl border border-hairline bg-surface px-3.5 py-3 text-[12.5px] text-muted-foreground">
                         The run finished without a written briefing — check the runner
@@ -994,6 +1175,55 @@ export function Console() {
       <div className="hidden w-[368px] shrink-0 border-l border-hairline bg-surface-2/30 p-3 lg:block">
         <IntelPanel turn={activeTurn} />
       </div>
+
+      <Dialog open={workshopOpen} onOpenChange={setWorkshopOpen}>
+        <DialogContent
+          title="Document Workshop"
+          description="Build, merge, split, stamp and number PDFs — entirely inside this browser."
+          className="w-[calc(100vw-1.5rem)] sm:max-w-[760px]"
+        >
+          <DocumentWorkshop />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={qrOpen} onOpenChange={setQrOpen}>
+        <DialogContent
+          title="QR Studio"
+          description="Styled, scannable QR codes — links, Wi-Fi, UPI, contacts. PNG and print-ready SVG."
+          className="w-[calc(100vw-1.5rem)] sm:max-w-[860px]"
+        >
+          <QrStudio />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={mapOpen} onOpenChange={setMapOpen}>
+        <DialogContent
+          title="Map & Globe"
+          description="The whole planet — zoom from orbit to street level, tap any spot to know what is there."
+          className="h-[min(80dvh,760px)] w-[calc(100vw-1.5rem)] sm:max-w-[920px]"
+          bodyClassName="relative p-0"
+        >
+          <MapExplorer initialQuery={mapQuery || undefined} />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={guideOpen} onOpenChange={setGuideOpen}>
+        <DialogContent
+          title="What SkOiT can do"
+          description="Every capability, with the exact words to ask for it. Tap any prompt to copy it."
+          className="w-[calc(100vw-1.5rem)] sm:max-w-[680px]"
+        >
+          <Guide />
+        </DialogContent>
+      </Dialog>
+
+      <ViewerDialog
+        request={viewer?.request ?? null}
+        open={viewer?.open ?? false}
+        onOpenChange={(open) =>
+          setViewer((current) => (current ? { ...current, open } : null))
+        }
+      />
     </div>
   );
 }

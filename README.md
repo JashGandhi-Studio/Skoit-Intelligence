@@ -4,7 +4,7 @@ A working open-source-intelligence workbench that runs on your own machine. It c
 public sources, shows exactly what it could **not** verify, scores the gaps as well as the findings,
 and saves every run as a case file you own.
 
-No accounts. No cloud database. No telemetry. 35 skills — 24 live against public endpoints, 11 offline
+No accounts. No cloud database. No telemetry. 48 skills — 33 live against public endpoints, 15 offline
 validators — and one rule enforced throughout: **nothing is asserted that was not collected.**
 
 ```
@@ -56,6 +56,15 @@ refusal to infer caste, religion or community)
 `pincode-intelligence` (PIN circles and states, live delivery-office data when reachable) ·
 `encyclopedia` (keyless Wikipedia lookup in the language of the question, licence and attribution stated) ·
 `audio-search` (Internet Archive, Wikimedia Commons and Openverse for downloadable audio; Jamendo in full with a free client id; official 30-second catalogue previews with store links for released music) ·
+
+**Everyday retrieval** — `music-saavn` (the JioSaavn catalogue: full-length songs, precision-ranked to the song you
+named, played and downloadable in-app; catalogue streams for personal listening, labelled as such) · `video-youtube`
+(YouTube search played through the official nocookie embed inside the console; downloads are deliberately not offered)
+· `news-google` (Google News per-country editions, newest first, publisher links resolved for in-app reading; the
+country is asked once, remembered, and can be switched by saying "news from …") · `open-web` (keyless DuckDuckGo/Bing
+search with four structured modes: exam papers with direct PDFs, study material, website discovery including fresh
+Vercel/Netlify projects, and product offer hunting across stores from a pasted Amazon/Flipkart link) ·
+`article-reader` (pulls any article out of its page, extracts key points, and feeds the in-app reader) ·
 `vehicle-registration` (state, RTO zone, series decode — plus a plain statement that owner data is not
 publicly obtainable)
 
@@ -122,6 +131,17 @@ This is the part that matters, and it is structural rather than a prompt instruc
 - Files never leave the browser: EXIF, hashing, entropy and PDF structure are parsed locally, and only
   the derived findings travel with the request.
 
+## Map & Globe
+
+A real zoomable planet, inside the console: ask "where is the Taj Mahal" (or "map of Tokyo", "locate
+Shibuya") and the globe opens and flies there. Spin it, pinch-zoom from orbit to street level, tap any
+spot to see what it is — reverse-geocoded on the spot, with a short Wikipedia summary and a link.
+Vector tiles from OpenFreeMap fall back to OpenStreetMap raster; search and place facts come from
+Nominatim and Wikipedia in your browser. Globe and flat views are one tap apart, and the locate button
+drops the pin on where you stand. One honest limit: a phone number can tell you country and line type
+(offline metadata), but **no tool can show an arbitrary number's last-seen/online status** — platforms
+don't expose it to strangers, and anything claiming to is a scam.
+
 ## Files, PDFs and voice
 
 Attach up to 6 files (8 MB each). Images are parsed for EXIF — device, serial, lens, timestamps, GPS —
@@ -130,6 +150,15 @@ that leaks: author, title, authoring toolchain, creation/modification times, enc
 signatures, embedded JavaScript, embedded files and incremental edits after the first save. If the
 dictionary is compressed or stripped, it says that instead of guessing. Dictation uses the browser's
 speech recogniser (en-IN, hi-IN, mr-IN, ta-IN, te-IN, bn-IN, gu-IN, kn-IN, ml-IN, en-US).
+
+## Free AI, no key
+
+Without any API key the built-in analyst writer produces the briefing from the collected
+evidence — deterministic, no hallucination. On top of that, a keyless free model can reword
+that briefing for readability; the rewrite is guarded structurally (every number in the
+original must survive, length bounds, refusal detection), labelled "wording only — facts
+unchanged", and the original stays one tap away. Setting AI to "off" in Settings skips the
+free model entirely. A personal OpenAI-compatible key in Settings upgrades the writing.
 
 ## Keys and models
 

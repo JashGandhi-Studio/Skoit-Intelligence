@@ -1258,7 +1258,7 @@ export function corroborate(articles: ArticleItem[]): {
 
 /* ------------------------------------------------------------------- Skills */
 
-const IMAGE_KEYWORDS = [
+export const IMAGE_KEYWORDS = [
   "image",
   "images",
   "photo",
@@ -1287,7 +1287,7 @@ const IMAGE_KEYWORDS = [
   "dikhao",
 ];
 
-const VIDEO_KEYWORDS = [
+export const VIDEO_KEYWORDS = [
   "video",
   "videos",
   "clip",
@@ -1306,7 +1306,7 @@ const VIDEO_KEYWORDS = [
   "video dikhao",
 ];
 
-const NEWS_KEYWORDS = [
+export const NEWS_KEYWORDS = [
   "news",
   "latest",
   "headline",
@@ -1322,7 +1322,7 @@ const NEWS_KEYWORDS = [
   "happening",
 ];
 
-const ARTICLE_KEYWORDS = [
+export const ARTICLE_KEYWORDS = [
   "article",
   "articles",
   "blog",
@@ -2001,7 +2001,7 @@ export const imageProvenance: SkillDefinition = {
 
 /* --------------------------------------------------------- Audio & music */
 
-const AUDIO_KEYWORDS = [
+export const AUDIO_KEYWORDS = [
   "song",
   "songs",
   "music",

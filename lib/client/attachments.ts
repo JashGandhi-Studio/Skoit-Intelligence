@@ -4,6 +4,7 @@ import exifr from "exifr";
 import { analyseDocument } from "@/lib/client/documents";
 import { perceptualHashes } from "@/lib/client/perceptual";
 import { md5, sha1, sha256, shannonEntropy } from "@/lib/crypto/digest";
+import { cacheAttachmentBytes } from "@/lib/skills/verify";
 import type { AttachmentPayload, Evidence } from "@/lib/types";
 import { newId } from "@/lib/utils";
 
@@ -63,6 +64,10 @@ export async function analyseAttachment(
       ],
     };
   }
+
+  // Skills that need the original bytes (on-device receipt OCR) read from this
+  // cache — the file itself still never leaves the browser.
+  cacheAttachmentBytes(file);
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   const [digest256, digest1, digestMd5] = await Promise.all([

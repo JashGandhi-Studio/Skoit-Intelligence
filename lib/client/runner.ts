@@ -2,7 +2,12 @@
 
 import { buildPlan } from "@/lib/agent/plan";
 import type { AnalysisBundle } from "@/lib/agent/synthesize";
-import { assessRisk, deterministicBriefing } from "@/lib/agent/synthesize";
+import {
+  assessRisk,
+  capabilityAnswer,
+  countryAskAnswer,
+  deterministicBriefing,
+} from "@/lib/agent/synthesize";
 import { getSkill } from "@/lib/skills";
 import type {
   AgentEvent,
@@ -190,7 +195,14 @@ export async function runClientPass(
   };
   const risk = assessRisk(bundle);
   onEvent({ type: "risk", risk });
-  const answer = deterministicBriefing(bundle, risk);
+  // A browser pass with no steps is the same conversation the server pass
+  // would answer: greeting, or the news-country question — not a briefing.
+  const answer =
+    steps.length === 0
+      ? plan.countryAsk
+        ? countryAskAnswer()
+        : capabilityAnswer(plan.smallTalk, { name: request.preferences?.userName })
+      : deterministicBriefing(bundle, risk);
   onEvent({
     type: "synthesis:done",
     text: answer,

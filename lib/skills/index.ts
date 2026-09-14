@@ -1,13 +1,17 @@
 import type { SkillDefinition, TargetKind } from "@/lib/types";
 import { domainSkills } from "./domain";
+import { everydaySkills } from "./everyday";
 import { identitySkills } from "./identity";
 import { indiaSkills } from "./india";
 import { ipSkills } from "./ip";
 import { knowledgeSkills } from "./knowledge";
 import { mediaSkills } from "./media";
 import { retrievalSkills } from "./retrieval";
+import { verifySkills } from "./verify";
+import { webSkills } from "./web";
 
 export const allSkills: SkillDefinition[] = [
+  ...everydaySkills,
   ...domainSkills,
   ...ipSkills,
   ...identitySkills,
@@ -15,6 +19,8 @@ export const allSkills: SkillDefinition[] = [
   ...mediaSkills,
   ...retrievalSkills,
   ...knowledgeSkills,
+  ...webSkills,
+  ...verifySkills,
 ];
 
 export const skillById = new Map(allSkills.map((skill) => [skill.id, skill]));

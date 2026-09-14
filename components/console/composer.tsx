@@ -33,6 +33,7 @@ const CATEGORY_LABEL: Record<SkillCategory, string> = {
   media: "Media & files",
   retrieval: "Find images, video & news",
   knowledge: "Knowledge",
+  assist: "Everyday tools",
   tradecraft: "Tradecraft",
 };
 

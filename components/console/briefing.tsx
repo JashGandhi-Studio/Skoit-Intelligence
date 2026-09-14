@@ -1,6 +1,17 @@
 "use client";
 
-import { BrainCircuit, Copy, FileDown, Printer, ShieldCheck } from "lucide-react";
+import {
+  BrainCircuit,
+  CircleStop,
+  Copy,
+  FileDown,
+  Globe2,
+  Printer,
+  ShieldCheck,
+  Sparkles,
+  Volume2,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -8,17 +19,127 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/misc";
 import type { TurnView } from "@/lib/client/cases";
+import { freeAiPolish } from "@/lib/client/free-ai";
+import { buildStyledPdf, markdownishToInput } from "@/lib/client/pdf-make";
+import { NEWS_EDITIONS, QUICK_COUNTRY_CODES } from "@/lib/news-editions";
 import { copyText, download } from "@/lib/utils";
 
-export function Briefing({ turn, caseTitle }: { turn: TurnView; caseTitle: string }) {
+export function Briefing({
+  turn,
+  caseTitle,
+  onQuickPrompt,
+  allowFreeAi = true,
+}: {
+  turn: TurnView;
+  caseTitle: string;
+  onQuickPrompt?: (prompt: string) => void;
+  /** free keyless AI polish — off when the user switched AI off in Settings */
+  allowFreeAi?: boolean;
+}) {
+  const [speaking, setSpeaking] = useState(false);
+  const [polish, setPolish] = useState<string | null>(null);
+  const [polishing, setPolishing] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const polishAttemptedFor = useRef<string | null>(null);
+
+  // Free AI, no key: when the deterministic analyst writer produced the
+  // briefing, offer a keyless model REWORDING of that exact text. Facts must
+  // survive (free-ai.ts enforces it structurally); failure is silent — the
+  // deterministic briefing is always complete on its own.
+  useEffect(() => {
+    const answer = turn.answer ?? "";
+    const eligible =
+      allowFreeAi &&
+      turn.answerMode === "analyst" &&
+      !answer.includes("{{ASK_COUNTRY}}") &&
+      answer.length >= 180;
+    if (!eligible || polishAttemptedFor.current === answer) {
+      return;
+    }
+    polishAttemptedFor.current = answer;
+    setPolishing(true);
+    const controller = new AbortController();
+    freeAiPolish(answer, { signal: controller.signal })
+      .then((reworded) => setPolish(reworded))
+      .catch(() => setPolish(null))
+      .finally(() => setPolishing(false));
+    return () => controller.abort();
+  }, [allowFreeAi, turn.answer, turn.answerMode]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
   if (!turn.answer) {
     return null;
   }
 
-  const markdown = turn.answer.replace(
-    /\[(\d{1,2})\]/g,
-    (_match, index) => `[${index}](#source-${index})`,
-  );
+  // Speak the briefing in the language the question was asked in — the
+  // browser's own voices, nothing recorded or uploaded.
+  const speakLanguage = /[\u0900-\u097F]/.test(turn.answer)
+    ? "hi-IN"
+    : /[\u0980-\u09FF]/.test(turn.answer)
+      ? "bn-IN"
+      : /[\u0B80-\u0BFF]/.test(turn.answer)
+        ? "ta-IN"
+        : turn.answerMode === "model" && turn.question
+          ? /[\u0900-\u097F]/.test(turn.question)
+            ? "hi-IN"
+            : "en-IN"
+          : "en-IN";
+
+  const toggleSpeak = () => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      toast.error("This browser has no speech voices");
+      return;
+    }
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const spoken = (turn.answer ?? "")
+      .replace(/[#*_`>[\]]/g, " ")
+      .replace(/https?:\/\/\S+/g, " ")
+      .slice(0, 2400);
+    const utterance = new SpeechSynthesisUtterance(spoken);
+    utterance.lang = speakLanguage;
+    utterance.rate = 1;
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    setSpeaking(true);
+  };
+
+  const asksCountry = turn.answer.includes("{{ASK_COUNTRY}}");
+  const markdown = turn.answer
+    .replace("{{ASK_COUNTRY}}", "")
+    .trim()
+    .replace(/\[(\d{1,2})\]/g, (_match, index) => `[${index}](#source-${index})`);
+  const display = polish && !showOriginal ? polish : markdown;
+
+  const saveAsPdf = async () => {
+    const sections = markdownishToInput(
+      turn.answer ?? "",
+      turn.question.slice(0, 120) || "SkOiT briefing",
+      caseTitle,
+    );
+    const built = await buildStyledPdf({
+      ...sections,
+      meta: `SkOiT analyst briefing · case: ${caseTitle} · ${new Date().toLocaleDateString()}`,
+      links: turn.sources
+        .filter((entry) => entry.url)
+        .map((entry) => ({ label: entry.label, url: entry.url as string })),
+    });
+    const { downloadGenerated } = await import("@/lib/client/download");
+    downloadGenerated(built.filename, built.blob);
+    toast.success(`Briefing saved as ${built.filename}`);
+  };
 
   return (
     <article className="animate-rise rounded-xl border border-hairline bg-surface">
@@ -33,6 +154,16 @@ export function Briefing({ turn, caseTitle }: { turn: TurnView; caseTitle: strin
           </Badge>
         </div>
         <div className="no-print flex items-center gap-1">
+          <Tip label={`Read this briefing aloud (${speakLanguage})`}>
+            <Button variant="ghost" size="iconSm" onClick={toggleSpeak}>
+              {speaking ? <CircleStop className="text-danger" /> : <Volume2 />}
+            </Button>
+          </Tip>
+          <Tip label="Save this briefing as a formatted PDF">
+            <Button variant="ghost" size="iconSm" onClick={() => void saveAsPdf()}>
+              <FileDown className="text-primary-strong" />
+            </Button>
+          </Tip>
           <Tip label="Copy the briefing as markdown">
             <Button
               variant="ghost"
@@ -69,6 +200,34 @@ export function Briefing({ turn, caseTitle }: { turn: TurnView; caseTitle: strin
           </Tip>
         </div>
       </header>
+
+      {polishing || polish ? (
+        <div className="no-print flex flex-wrap items-center gap-2 border-b border-hairline bg-primary-soft/40 px-4 py-2">
+          <Sparkles className="size-3.5 text-primary" />
+          {polishing ? (
+            <span className="text-[11.5px] text-muted-foreground">
+              Free AI is rewording this briefing — no key needed, facts stay locked…
+            </span>
+          ) : (
+            <>
+              <Badge tone="primary" mono>
+                free-AI polish
+              </Badge>
+              <span className="text-[11px] text-muted-foreground">
+                wording only — every fact and number is unchanged
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto"
+                onClick={() => setShowOriginal((current) => !current)}
+              >
+                {showOriginal ? "Show polished" : "Show original"}
+              </Button>
+            </>
+          )}
+        </div>
+      ) : null}
 
       <div className="prose-skoit prose prose-sm max-w-none px-4 py-3.5 dark:prose-invert">
         <Markdown
@@ -122,9 +281,39 @@ export function Briefing({ turn, caseTitle }: { turn: TurnView; caseTitle: strin
             },
           }}
         >
-          {markdown}
+          {display}
         </Markdown>
       </div>
+
+      {asksCountry && onQuickPrompt ? (
+        <div className="border-t border-hairline px-4 py-3">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-faint-foreground uppercase">
+            <Globe2 className="size-3.5 text-primary" />
+            Tap your country
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_COUNTRY_CODES.map((code) => {
+              const edition = NEWS_EDITIONS.find((entry) => entry.code === code);
+              if (!edition) {
+                return null;
+              }
+              return (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() =>
+                    onQuickPrompt(`Show the latest news from ${edition.label}`)
+                  }
+                  className="flex items-center gap-1.5 rounded-full border border-hairline px-3 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:border-primary/50 hover:bg-primary-soft"
+                >
+                  <span aria-hidden>{edition.flag}</span>
+                  {edition.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {turn.sources.length > 0 ? (
         <footer className="border-t border-hairline px-4 py-3">
