@@ -8,7 +8,10 @@ import {
   Files,
   FileText,
   Hash,
+  Info,
+  LayoutGrid,
   LoaderCircle,
+  Proportions,
   RotateCw,
   Scissors,
   Stamp,
@@ -22,9 +25,13 @@ import { Tab, TabList, Tabs } from "@/components/ui/misc";
 import { downloadGenerated, fileNameFor } from "@/lib/client/download";
 import { buildStyledPdf, markdownishToInput } from "@/lib/client/pdf-make";
 import {
+  coverPagePdf,
+  editMetadataPdf,
   imagesToPdf,
   mergePdfs,
   type NamedBytes,
+  normalizeA4Pdf,
+  nUpPdf,
   numberPdf,
   PdfToolError,
   removePages,
@@ -48,6 +55,10 @@ type ToolId =
   | "merge"
   | "split"
   | "organize"
+  | "nup"
+  | "a4"
+  | "cover"
+  | "meta"
   | "watermark"
   | "numbers";
 
@@ -85,6 +96,33 @@ const TOOLS: Array<{ id: ToolId; label: string; icon: typeof FileText; blurb: st
       blurb: "Straighten scans or drop pages you do not need.",
     },
     {
+      id: "nup",
+      label: "N-up sheets",
+      icon: LayoutGrid,
+      blurb: "Print handouts: 2 or 4 pages per A4 sheet, auto-fit and centred.",
+    },
+    {
+      id: "a4",
+      label: "Normalise A4",
+      icon: Proportions,
+      blurb:
+        "Scale every page onto exact A4 — mixed-size scans become one clean, printable stack.",
+    },
+    {
+      id: "cover",
+      label: "Cover page",
+      icon: FilePlus2,
+      blurb:
+        "Prepend a titled cover page to any PDF — name, subtitle, your name, today's date.",
+    },
+    {
+      id: "meta",
+      label: "Details",
+      icon: Info,
+      blurb:
+        "Set the PDF's Title / Author / Subject — what readers and file managers display.",
+    },
+    {
       id: "watermark",
       label: "Watermark",
       icon: Stamp,
@@ -98,6 +136,10 @@ const TOOLS: Array<{ id: ToolId; label: string; icon: typeof FileText; blurb: st
       blurb: "Add “Page x of y” to the bottom of every page.",
     },
   ];
+
+function baseName(name: string): string {
+  return name.replace(/\.pdf$/i, "");
+}
 
 async function fileBytes(file: File): Promise<Uint8Array> {
   return new Uint8Array(await file.arrayBuffer());
@@ -250,6 +292,13 @@ export function DocumentWorkshop() {
   const [rotateAngle, setRotateAngle] = useState<90 | 180 | 270>(90);
   const [deleteSpec, setDeleteSpec] = useState("");
   const [watermarkText, setWatermarkText] = useState("CONFIDENTIAL");
+  const [nupCount, setNupCount] = useState<2 | 4>(2);
+  const [coverTitle, setCoverTitle] = useState("");
+  const [coverSubtitle, setCoverSubtitle] = useState("");
+  const [coverAuthor, setCoverAuthor] = useState("");
+  const [metaTitle, setMetaTitle] = useState("");
+  const [metaAuthor, setMetaAuthor] = useState("");
+  const [metaSubject, setMetaSubject] = useState("");
 
   const addImages = useCallback((incoming: File[]) => {
     setImageFiles((current) => [
@@ -300,7 +349,7 @@ export function DocumentWorkshop() {
   return (
     <div className="space-y-4">
       <Tabs value={tool} onValueChange={(value) => setTool(value as ToolId)}>
-        <TabList className="flex-wrap">
+        <TabList className="flex-wrap justify-start">
           {TOOLS.map((entry) => (
             <Tab key={entry.id} value={entry.id}>
               <entry.icon className="size-3.5" />
@@ -583,6 +632,239 @@ export function DocumentWorkshop() {
               onFiles={addSingle}
               onRemove={() => undefined}
               hint="Choose the PDF to rotate or trim"
+            />
+          )}
+        </div>
+      ) : null}
+
+      {/* ------------------------------------------------------- n-up ---- */}
+      {tool === "nup" ? (
+        <div className="space-y-2.5">
+          {singleFile ? (
+            <>
+              <DropZone
+                accept="application/pdf,.pdf"
+                multiple={false}
+                files={[singleFile]}
+                onFiles={addSingle}
+                onRemove={() => setSingleFile(null)}
+                hint="The PDF to lay out as a handout"
+              />
+              <div className="flex gap-1.5">
+                {[2, 4].map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    onClick={() => setNupCount(count as 2 | 4)}
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-[12px] font-medium transition-colors",
+                      nupCount === count
+                        ? "border-primary/50 bg-primary-soft text-primary-strong"
+                        : "border-hairline text-muted-foreground hover:bg-surface-2",
+                    )}
+                  >
+                    {count} per sheet
+                  </button>
+                ))}
+              </div>
+              <RunButton
+                running={running}
+                onClick={() =>
+                  void run(async () => {
+                    const input = await withBytes(singleFile);
+                    const bytes = await nUpPdf(input, nupCount);
+                    downloadGenerated(
+                      `${truncate(baseName(singleFile.name), 40)}-${nupCount}up.pdf`,
+                      bytes,
+                      "application/pdf",
+                    );
+                    toast.success(`${nupCount}-up handout saved`);
+                  })
+                }
+              >
+                Build the handout
+              </RunButton>
+            </>
+          ) : (
+            <DropZone
+              accept="application/pdf,.pdf"
+              multiple={false}
+              files={[]}
+              onFiles={addSingle}
+              onRemove={() => undefined}
+              hint="Choose the PDF for the handout layout"
+            />
+          )}
+        </div>
+      ) : null}
+
+      {/* --------------------------------------------------------- a4 ---- */}
+      {tool === "a4" ? (
+        <div className="space-y-2.5">
+          {singleFile ? (
+            <>
+              <DropZone
+                accept="application/pdf,.pdf"
+                multiple={false}
+                files={[singleFile]}
+                onFiles={addSingle}
+                onRemove={() => setSingleFile(null)}
+                hint="The PDF to normalise onto A4"
+              />
+              <RunButton
+                running={running}
+                onClick={() =>
+                  void run(async () => {
+                    const input = await withBytes(singleFile);
+                    const bytes = await normalizeA4Pdf(input);
+                    downloadGenerated(
+                      `${truncate(baseName(singleFile.name), 40)}-a4.pdf`,
+                      bytes,
+                      "application/pdf",
+                    );
+                    toast.success("A4-normalised copy saved");
+                  })
+                }
+              >
+                Normalise to A4
+              </RunButton>
+            </>
+          ) : (
+            <DropZone
+              accept="application/pdf,.pdf"
+              multiple={false}
+              files={[]}
+              onFiles={addSingle}
+              onRemove={() => undefined}
+              hint="Choose the mixed-size PDF"
+            />
+          )}
+        </div>
+      ) : null}
+
+      {/* ------------------------------------------------------- cover ---- */}
+      {tool === "cover" ? (
+        <div className="space-y-2.5">
+          {singleFile ? (
+            <>
+              <DropZone
+                accept="application/pdf,.pdf"
+                multiple={false}
+                files={[singleFile]}
+                onFiles={addSingle}
+                onRemove={() => setSingleFile(null)}
+                hint="The PDF to prepend the cover to"
+              />
+              <Input
+                value={coverTitle}
+                onChange={(event) => setCoverTitle(event.target.value)}
+                placeholder="Cover title"
+              />
+              <Input
+                value={coverSubtitle}
+                onChange={(event) => setCoverSubtitle(event.target.value)}
+                placeholder="Subtitle (optional)"
+              />
+              <Input
+                value={coverAuthor}
+                onChange={(event) => setCoverAuthor(event.target.value)}
+                placeholder="Your name (optional)"
+              />
+              <RunButton
+                running={running}
+                disabled={coverTitle.trim().length === 0}
+                onClick={() =>
+                  void run(async () => {
+                    const input = await withBytes(singleFile);
+                    const bytes = await coverPagePdf(input, {
+                      title: coverTitle,
+                      subtitle: coverSubtitle || undefined,
+                      author: coverAuthor || undefined,
+                    });
+                    downloadGenerated(
+                      `${truncate(baseName(singleFile.name), 40)}-covered.pdf`,
+                      bytes,
+                      "application/pdf",
+                    );
+                    toast.success("Cover page added");
+                  })
+                }
+              >
+                Add the cover
+              </RunButton>
+            </>
+          ) : (
+            <DropZone
+              accept="application/pdf,.pdf"
+              multiple={false}
+              files={[]}
+              onFiles={addSingle}
+              onRemove={() => undefined}
+              hint="Choose the PDF that needs a cover"
+            />
+          )}
+        </div>
+      ) : null}
+
+      {/* -------------------------------------------------------- meta ---- */}
+      {tool === "meta" ? (
+        <div className="space-y-2.5">
+          {singleFile ? (
+            <>
+              <DropZone
+                accept="application/pdf,.pdf"
+                multiple={false}
+                files={[singleFile]}
+                onFiles={addSingle}
+                onRemove={() => setSingleFile(null)}
+                hint="The PDF whose details to set"
+              />
+              <Input
+                value={metaTitle}
+                onChange={(event) => setMetaTitle(event.target.value)}
+                placeholder="Title"
+              />
+              <Input
+                value={metaAuthor}
+                onChange={(event) => setMetaAuthor(event.target.value)}
+                placeholder="Author (optional)"
+              />
+              <Input
+                value={metaSubject}
+                onChange={(event) => setMetaSubject(event.target.value)}
+                placeholder="Subject (optional)"
+              />
+              <RunButton
+                running={running}
+                disabled={metaTitle.trim().length === 0}
+                onClick={() =>
+                  void run(async () => {
+                    const input = await withBytes(singleFile);
+                    const bytes = await editMetadataPdf(input, {
+                      title: metaTitle,
+                      author: metaAuthor || undefined,
+                      subject: metaSubject || undefined,
+                    });
+                    downloadGenerated(
+                      `${truncate(baseName(singleFile.name), 40)}-details.pdf`,
+                      bytes,
+                      "application/pdf",
+                    );
+                    toast.success("Details written");
+                  })
+                }
+              >
+                Write details
+              </RunButton>
+            </>
+          ) : (
+            <DropZone
+              accept="application/pdf,.pdf"
+              multiple={false}
+              files={[]}
+              onFiles={addSingle}
+              onRemove={() => undefined}
+              hint="Choose the PDF"
             />
           )}
         </div>

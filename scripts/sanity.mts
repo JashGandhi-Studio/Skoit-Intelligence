@@ -205,5 +205,104 @@ function planOf(message: string, preferences?: Partial<AnswerPreferences>) {
   check("image ask unchanged", image.steps[0]?.skillId === "image-search");
 }
 
+// ---- places: local news scoping ----
+import {
+  detectPlaceInText,
+  labelOfPlace,
+  stripPlaceFromTopic,
+} from "@/lib/news-places";
+{
+  const mumbai = detectPlaceInText("Mumbai news today");
+  check("mumbai detected", mumbai?.place.name === "mumbai" && mumbai.place.feed === "geo");
+  check("mumbai label", mumbai?.label === "Mumbai · Maharashtra · India");
+
+  const state = detectPlaceInText("news from Maharashtra");
+  check("state uses search feed", state?.place.feed === "search");
+
+  const nyc = detectPlaceInText("headlines for new york");
+  check("new york", nyc?.place.name === "new york" && nyc.place.country === "us");
+  check("nyc alias", detectPlaceInText("NYC headlines")?.place.name === "new york");
+
+  check("no false positive", detectPlaceInText("explain total quality management") === undefined);
+  check("strip place", stripPlaceFromTopic("mumbai news today").toLowerCase().includes("today"));
+}
+
+// ---- forward checker ----
+import {
+  claimQueryOf,
+  cleanForwardText,
+  type ForwardCandidate,
+  verdictForForward,
+} from "@/lib/verify-values";
+{
+  const raw = "Forwarded as received!! DEAR ALL - RBI is giving every citizen Rs 5 lakh under the new scheme. Please forward to all.";
+  const cleaned = cleanForwardText(raw);
+  check("forward noise stripped", !/forwarded as received/i.test(cleaned) && !/dear all/i.test(cleaned));
+  const query = claimQueryOf(cleaned);
+  check("claim query has content words", query.split(" ").length >= 3 && /rbi/i.test(query));
+
+  const fake: ForwardCandidate[] = [
+    { title: "PIB Fact Check: No such RBI scheme", url: "https://pib.gov.in/fc1", snippet: "The claim is false — RBI has announced no such deposit scheme.", host: "pib.gov.in" },
+    { title: "AltNews debunks viral RBI message", url: "https://altnews.com/fc2", snippet: "The viral message is fake and misleading.", host: "altnews.com" },
+    { title: "BOOM: RBI ₹5 lakh claim is fake", url: "https://boomlive.in/fc3", snippet: "This is a hoax circulating on WhatsApp.", host: "boomlive.in" },
+  ];
+  const verdict = verdictForForward(cleaned, fake);
+  check("fake → dont", verdict.verdict === "dont");
+  check("dont headline", /don.?t/i.test(verdict.headline));
+  check("fact checks counted", verdict.factChecks.length === 3);
+
+  const real: ForwardCandidate[] = [
+    { title: "ISRO confirms Chandrayaan success", url: "https://isro.gov.in/a", snippet: "Confirmed: the lander achieved soft landing.", host: "isro.gov.in", publishedAt: Date.now() - 8e8 },
+    { title: "Chandrayaan lands, reports Times of India", url: "https://timesofindia.indiatimes.com/b", snippet: "India lands on the moon.", host: "timesofindia.indiatimes.com" },
+    { title: "The Hindu: soft landing achieved", url: "https://thehindu.com/c", snippet: "Historic soft landing.", host: "thehindu.com" },
+    { title: "Indian Express coverage", url: "https://indianexpress.com/d", snippet: "Chandrayaan soft landing.", host: "indianexpress.com" },
+  ];
+  const realVerdict = verdictForForward("chandrayaan soft landing success", real);
+  check("3+ domains → forward", realVerdict.verdict === "forward" && realVerdict.corroborations >= 3);
+  check("first seen oldest", realVerdict.firstSeen !== undefined);
+
+  const nothing = verdictForForward("some random chain about a miracle", [
+    { title: "Miracle video", url: "https://youtube.com/x", snippet: "", host: "youtube.com" },
+  ]);
+  check("nothing → caution", nothing.verdict === "caution");
+}
+
+// ---- GSTIN checksum + receipt parsing ----
+import { gstinCheckDigit, gstinLooksValid, priceFromSnippet, readReceiptText } from "@/lib/verify-values";
+{
+  const base = "27AAPFU0939F1Z";
+  const digit = gstinCheckDigit(base);
+  check("gstin digit produced", /^[0-9A-Z]$/.test(digit));
+  check("gstin valid roundtrip", gstinLooksValid(`${base}${digit}`));
+  check("gstin tampered rejected", !gstinLooksValid(`${base}${digit === "V" ? "W" : "V"}`));
+
+  const bill = `SHREE ELECTRONICS
+  123 Laxmi Road, Pune 411002
+  GSTIN: 27AAPFU0939F1Z${gstinCheckDigit("27AAPFU0939F1Z")}
+  Invoice No: INV/2026/007
+  Date: 12/09/2026
+  Item 1 x 2,499.00
+  CGST 6% 149.94
+  SGST 6% 149.94
+  Grand Total: ₹2,798.88`;
+  const finding = readReceiptText(bill);
+  check("receipt gstin", finding.gstin?.checksumValid === true && finding.gstin.stateCode === "Maharashtra");
+  check("receipt amount", finding.amount?.value === 2798.88);
+  check("receipt date", finding.date?.iso === "2026-09-12");
+  check("receipt invoice", finding.invoiceNo === "INV/2026/007");
+  check("receipt vendor", /shree electronics/i.test(finding.vendorGuess ?? ""));
+
+  const price = priceFromSnippet("Buy Foo Bar 5G online at ₹64,999. MRP ₹72,000. Free delivery.");
+  check("snippet price picks selling figure", price?.value === 64999);
+  check("snippet price none", priceFromSnippet("great phone with amazing camera") === undefined);
+}
+
+// ---- translator module shape (pure parts) ----
+import { scriptOf } from "@/lib/client/translate";
+{
+  check("devanagari script", scriptOf("यह एक टेस्ट है") === "hi");
+  check("latin script", scriptOf("this is a test") === "en");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

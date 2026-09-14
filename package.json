@@ -2,7 +2,7 @@
   "name": "skoit",
   "version": "1.0.0",
   "private": true,
-  "description": "SkOiT \u2014 an OSINT analyst console that finds images, video, articles and news from free sources, answers at the depth you ask for, and saves every case locally.",
+  "description": "SkOiT — an OSINT analyst console that finds images, video, articles and news from free sources, answers at the depth you ask for, and saves every case locally.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -34,7 +34,8 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^1.5.0",
-    "tailwind-merge": "^2.5.2"
+    "tailwind-merge": "^2.5.2",
+    "tesseract.js": "^6.0.1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.11",
@@ -46,8 +47,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "tailwindcss": "^4.1.13",
-    "typescript": "^5.6.3",
-    "tsx": "^4.23.13"
+    "tsx": "^4.23.13",
+    "typescript": "^5.6.3"
   },
   "engines": {
     "node": ">=20.9.0"

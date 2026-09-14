@@ -24,7 +24,7 @@ export function DialogContent({
 }) {
   const sideClasses = {
     center:
-      "left-1/2 top-1/2 w-[min(560px,calc(100vw-1.5rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl",
+      "left-1/2 top-1/2 max-h-[88dvh] w-[min(560px,calc(100vw-1.5rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl",
     left: "left-0 top-0 h-full w-[min(320px,86vw)] rounded-r-2xl",
     right: "right-0 top-0 h-full w-[min(400px,92vw)] rounded-l-2xl",
     bottom: "bottom-0 left-0 w-full max-h-[88dvh] rounded-t-2xl",
@@ -57,7 +57,7 @@ export function DialogContent({
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
         </header>
-        <div className="thin-scroll min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
+        <div className="thin-scroll min-h-0 flex-1 basis-0 overflow-y-auto overscroll-contain px-4 py-3.5">
           {children}
         </div>
       </DialogPrimitive.Content>

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { OffersTable, PapersShelf, TranslateStrip } from "@/components/console/shelves";
 import type { ViewerRequest } from "@/components/console/viewers";
 import { Badge } from "@/components/ui/badge";
 import { forceDownload } from "@/lib/client/download";
@@ -327,12 +328,16 @@ function ClipRow({
 function ArticleRow({
   item,
   onOpenViewer,
+  translated,
 }: {
   item: ArticleItem;
   onOpenViewer: (request: ViewerRequest) => void;
+  translated?: { title?: string; snippet?: string };
 }) {
   const independent = (item.corroborations ?? 0) > 0;
   const isPdf = looksLikePdf(item.url);
+  const shownTitle = translated?.title || item.title;
+  const shownSnippet = translated?.snippet || item.snippet;
   return (
     <li className="rounded-xl border border-hairline bg-surface p-2.5 transition-colors hover:border-primary/30">
       <button
@@ -344,11 +349,11 @@ function ArticleRow({
         }
         className="text-left text-[12.5px] leading-snug font-medium text-foreground transition-colors hover:text-primary-strong"
       >
-        {item.title}
+        {shownTitle}
       </button>
-      {item.snippet ? (
+      {shownSnippet ? (
         <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
-          {item.snippet}
+          {shownSnippet}
         </p>
       ) : null}
 
@@ -413,11 +418,26 @@ export function ResultsGallery({
   articles?: ArticleItem[];
   onOpenViewer: (request: ViewerRequest) => void;
 }) {
+  const [translations, setTranslations] = useState<{
+    titles: Map<string, string>;
+    snippets: Map<string, string> | null;
+  } | null>(null);
+
   const items = media ?? [];
   const reports = articles ?? [];
   const images = items.filter((item) => item.kind === "image");
   const clips = items.filter((item) => item.kind === "video");
   const audio = items.filter((item) => item.kind === "audio");
+
+  // The structured shelves pull their items out of the plain list.
+  const papers = reports.filter((item) => item.shelf === "papers");
+  const offers = reports.filter((item) => item.shelf === "offers");
+  const plainReports = reports.filter(
+    (item) => item.shelf !== "papers" && item.shelf !== "offers",
+  );
+  const newsLike = plainReports.filter(
+    (item) => item.publishedAt || item.shelf === undefined,
+  );
 
   if (images.length + clips.length + audio.length + reports.length === 0) {
     return null;
@@ -495,15 +515,42 @@ export function ResultsGallery({
         </div>
       ) : null}
 
-      {reports.length > 0 ? (
-        <div>
-          <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            <FileText className="size-3" />
-            Reporting
-          </p>
+      {papers.length > 0 ? (
+        <PapersShelf
+          items={papers}
+          onOpenViewer={(request) =>
+            request.type === "pdf"
+              ? onOpenViewer({ type: "pdf", url: request.url, title: request.title })
+              : onOpenViewer({ type: "article", article: request.article })
+          }
+        />
+      ) : null}
+
+      {offers.length > 0 ? <OffersTable items={offers} /> : null}
+
+      {plainReports.length > 0 ? (
+        <div className="space-y-2">
+          {newsLike.length > 0 ? (
+            <TranslateStrip
+              articles={newsLike.slice(0, 12)}
+              onTranslation={(titles, snippets) => setTranslations({ titles, snippets })}
+            />
+          ) : null}
           <ul className="space-y-2">
-            {reports.slice(0, 10).map((item) => (
-              <ArticleRow key={item.id} item={item} onOpenViewer={onOpenViewer} />
+            {plainReports.slice(0, 12).map((item) => (
+              <ArticleRow
+                key={item.id}
+                item={item}
+                onOpenViewer={onOpenViewer}
+                translated={
+                  translations
+                    ? {
+                        title: translations.titles.get(item.url),
+                        snippet: translations.snippets?.get(item.url) ?? undefined,
+                      }
+                    : undefined
+                }
+              />
             ))}
           </ul>
         </div>

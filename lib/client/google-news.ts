@@ -1,5 +1,6 @@
 import { hostOf, isRelayOk, relayText } from "@/lib/client/cors-fetch";
 import { editionByCode, type NewsEdition } from "@/lib/news-editions";
+import type { NewsPlace } from "@/lib/news-places";
 import type { ArticleItem } from "@/lib/types";
 import { newId } from "@/lib/utils";
 
@@ -43,24 +44,42 @@ export interface GoogleNewsResult {
   edition: NewsEdition;
   via: string;
   query?: string;
+  /** Present when the feed was scoped to a city or state. */
+  placeLabel?: string;
 }
 
 function feedUrl(
   topic: NewsTopic | undefined,
   query: string | undefined,
   edition: NewsEdition,
+  place?: NewsPlace,
 ) {
   const base = "https://news.google.com/rss";
   const params = `hl=${edition.hl}&gl=${edition.gl}&ceid=${edition.ceid}`;
+  // City geo feeds are first-class at Google News: /headlines/section/geo/<City>.
+  if (place?.feed === "geo") {
+    return `${base}/headlines/section/geo/${encodeURIComponent(titleCaseWords(place.name))}?${params}`;
+  }
+  if (place?.feed === "search") {
+    return `${base}/search?q=${encodeURIComponent(titleCaseWords(place.name))}&${params}`;
+  }
   if (query && query.trim().length > 0) {
-    const when = "";
-    return `${base}/search?q=${encodeURIComponent(query.trim())}${when}&${params}`;
+    return `${base}/search?q=${encodeURIComponent(query.trim())}&${params}`;
   }
   const topicId = topic && topic !== "top" ? TOPIC_IDS[topic] : undefined;
   if (topicId) {
     return `${base}/headlines/section/topic/${topicId}?${params}`;
   }
   return `${base}?${params}`;
+}
+
+function titleCaseWords(value: string): string {
+  return value
+    .split(" ")
+    .map((word) =>
+      word === "ncr" ? "NCR" : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
 }
 
 function decodeEntities(value: string): string {
@@ -153,10 +172,13 @@ export async function googleNews(options: {
   topic?: NewsTopic;
   query?: string;
   countryCode?: string;
+  place?: NewsPlace;
   limit?: number;
   signal?: AbortSignal;
 }): Promise<GoogleNewsResult & { error?: string }> {
-  const edition = editionByCode(options.countryCode) ?? editionByCode("world");
+  const edition =
+    editionByCode(options.countryCode ?? options.place?.country) ??
+    editionByCode("world");
   if (!edition) {
     return {
       articles: [],
@@ -165,7 +187,7 @@ export async function googleNews(options: {
       error: "no edition",
     };
   }
-  const url = feedUrl(options.topic, options.query, edition);
+  const url = feedUrl(options.topic, options.query, edition, options.place);
   const fetched = await relayText(url, {
     accept: "application/rss+xml, application/xml, text/xml, */*",
     skipDirect: true,
@@ -217,5 +239,18 @@ export async function googleNews(options: {
     .sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
     .slice(0, options.limit ?? 24);
 
-  return { articles: deduped, edition, via: fetched.via };
+  return {
+    articles: deduped,
+    edition,
+    via: fetched.via,
+    placeLabel: options.place ? labelForPlace(options.place) : undefined,
+  };
+}
+
+function labelForPlace(place: NewsPlace): string {
+  const parts = [titleCaseWords(place.name)];
+  if (place.region) {
+    parts.push(place.region);
+  }
+  return parts.join(" · ");
 }

@@ -1,6 +1,16 @@
 "use client";
 
-import { BrainCircuit, Copy, FileDown, Globe2, Printer, ShieldCheck } from "lucide-react";
+import {
+  BrainCircuit,
+  CircleStop,
+  Copy,
+  FileDown,
+  Globe2,
+  Printer,
+  ShieldCheck,
+  Volume2,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -21,9 +31,57 @@ export function Briefing({
   caseTitle: string;
   onQuickPrompt?: (prompt: string) => void;
 }) {
+  const [speaking, setSpeaking] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
   if (!turn.answer) {
     return null;
   }
+
+  // Speak the briefing in the language the question was asked in — the
+  // browser's own voices, nothing recorded or uploaded.
+  const speakLanguage = /[\u0900-\u097F]/.test(turn.answer)
+    ? "hi-IN"
+    : /[\u0980-\u09FF]/.test(turn.answer)
+      ? "bn-IN"
+      : /[\u0B80-\u0BFF]/.test(turn.answer)
+        ? "ta-IN"
+        : turn.answerMode === "model" && turn.question
+          ? /[\u0900-\u097F]/.test(turn.question)
+            ? "hi-IN"
+            : "en-IN"
+          : "en-IN";
+
+  const toggleSpeak = () => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      toast.error("This browser has no speech voices");
+      return;
+    }
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const spoken = (turn.answer ?? "")
+      .replace(/[#*_`>[\]]/g, " ")
+      .replace(/https?:\/\/\S+/g, " ")
+      .slice(0, 2400);
+    const utterance = new SpeechSynthesisUtterance(spoken);
+    utterance.lang = speakLanguage;
+    utterance.rate = 1;
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    setSpeaking(true);
+  };
 
   const asksCountry = turn.answer.includes("{{ASK_COUNTRY}}");
   const markdown = turn.answer
@@ -62,6 +120,11 @@ export function Briefing({
           </Badge>
         </div>
         <div className="no-print flex items-center gap-1">
+          <Tip label={`Read this briefing aloud (${speakLanguage})`}>
+            <Button variant="ghost" size="iconSm" onClick={toggleSpeak}>
+              {speaking ? <CircleStop className="text-danger" /> : <Volume2 />}
+            </Button>
+          </Tip>
           <Tip label="Save this briefing as a formatted PDF">
             <Button variant="ghost" size="iconSm" onClick={() => void saveAsPdf()}>
               <FileDown className="text-primary-strong" />

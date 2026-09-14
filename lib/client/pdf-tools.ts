@@ -303,3 +303,159 @@ export async function countPages(bytes: Uint8Array): Promise<number> {
   const doc = await load(bytes);
   return doc.getPageCount();
 }
+
+/* ---------------------------------------------------------------- n-up ---- */
+
+/** Embed 2 or 4 source pages per A4 sheet (handout style). */
+export async function nUpPdf(file: NamedBytes, perSheet: 2 | 4): Promise<Uint8Array> {
+  const src = await load(file.bytes);
+  const out = await PDFDocument.create();
+  out.setTitle(`${baseName(file.name)} (${perSheet}-up)`);
+  out.setProducer("SkOiT Document Workshop");
+  const a4width = 595.28;
+  const a4height = 841.89;
+
+  const embedded = await out.embedPages(src.getPages());
+  const cols = perSheet === 2 ? 1 : 2;
+  const rows = perSheet === 2 ? 2 : 2;
+  const cellWidth = (a4width - 24) / cols;
+  const cellHeight = (a4height - 24) / rows;
+
+  for (let index = 0; index < embedded.length; index += perSheet) {
+    const page = out.addPage([a4width, a4height]);
+    const batch = embedded.slice(index, index + perSheet);
+    batch.forEach((cell, position) => {
+      const col = position % cols;
+      const row = Math.floor(position / cols);
+      const scale = Math.min(cellWidth / cell.width, cellHeight / cell.height);
+      const width = cell.width * scale;
+      const height = cell.height * scale;
+      const x = 12 + col * cellWidth + (cellWidth - width) / 2;
+      const y = a4height - 12 - (row + 1) * cellHeight + (cellHeight - height) / 2;
+      page.drawPage(cell, { x, y, width, height });
+    });
+  }
+  return save(out);
+}
+
+/* ------------------------------------------------------- normalize A4 ----- */
+
+/** Scale every page onto exact A4 — mixed-size scans become one clean stack. */
+export async function normalizeA4Pdf(file: NamedBytes): Promise<Uint8Array> {
+  const doc = await load(file.bytes);
+  const a4width = 595.28;
+  const a4height = 841.89;
+  for (const page of doc.getPages()) {
+    const { width, height } = page.getSize();
+    const alreadyA4 = Math.abs(width - a4width) < 1 && Math.abs(height - a4height) < 1;
+    if (alreadyA4) {
+      continue;
+    }
+    const scale = Math.min(a4width / width, a4height / height) * 0.98;
+    page.scaleContent(scale, scale);
+    page.setSize(a4width, a4height);
+    page.translateContent((a4width - width * scale) / 2, (a4height - height * scale) / 2);
+  }
+  doc.setProducer("SkOiT Document Workshop");
+  return save(doc);
+}
+
+/* --------------------------------------------------------- metadata edit -- */
+
+export async function editMetadataPdf(
+  file: NamedBytes,
+  meta: { title?: string; author?: string; subject?: string },
+): Promise<Uint8Array> {
+  const doc = await load(file.bytes);
+  if (meta.title?.trim()) {
+    doc.setTitle(meta.title.trim());
+  }
+  if (meta.author?.trim()) {
+    doc.setAuthor(meta.author.trim());
+  }
+  if (meta.subject?.trim()) {
+    doc.setSubject(meta.subject.trim());
+  }
+  doc.setModificationDate(new Date());
+  doc.setProducer("SkOiT Document Workshop");
+  return save(doc);
+}
+
+/* ---------------------------------------------------------- cover page ---- */
+
+export async function coverPagePdf(
+  file: NamedBytes,
+  options: { title: string; subtitle?: string; author?: string },
+): Promise<Uint8Array> {
+  const cleanTitle = options.title.trim().slice(0, 90);
+  if (!cleanTitle) {
+    throw new PdfToolError("Type a title for the cover page.");
+  }
+  const src = await load(file.bytes);
+  const out = await PDFDocument.create();
+  out.setProducer("SkOiT Document Workshop");
+  out.setTitle(cleanTitle);
+
+  const font = await out.embedFont(StandardFonts.HelveticaBold);
+  const regular = await out.embedFont(StandardFonts.Helvetica);
+  const page = out.addPage([595.28, 841.89]);
+
+  page.drawRectangle({
+    x: 64,
+    y: 640,
+    width: 72,
+    height: 5,
+    color: rgb(0.9, 0.45, 0.16),
+  });
+  const words = cleanTitle.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, 30) > 460) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) {
+    lines.push(current);
+  }
+  let y = 590;
+  for (const line of lines) {
+    page.drawText(line, { x: 64, y, size: 30, font, color: rgb(0.11, 0.13, 0.16) });
+    y -= 38;
+  }
+  if (options.subtitle?.trim()) {
+    page.drawText(options.subtitle.trim().slice(0, 120), {
+      x: 64,
+      y: y - 8,
+      size: 13,
+      font: regular,
+      color: rgb(0.35, 0.37, 0.42),
+    });
+  }
+  if (options.author?.trim()) {
+    page.drawText(options.author.trim().slice(0, 80), {
+      x: 64,
+      y: 96,
+      size: 11,
+      font: regular,
+      color: rgb(0.35, 0.37, 0.42),
+    });
+  }
+  page.drawText(new Date().toLocaleDateString(), {
+    x: 64,
+    y: 76,
+    size: 10,
+    font: regular,
+    color: rgb(0.55, 0.57, 0.62),
+  });
+
+  const pages = await out.copyPages(src, src.getPageIndices());
+  for (const copied of pages) {
+    out.addPage(copied);
+  }
+  return save(out);
+}

@@ -1,4 +1,5 @@
 import { detectCountryStatement } from "@/lib/news-editions";
+import { detectPlaceInText } from "@/lib/news-places";
 import { getSkill, skillsMatchingText } from "@/lib/skills";
 import {
   detectTargets,
@@ -29,6 +30,10 @@ export interface AnswerIntent {
   wantsVideo: boolean;
   /** A structured web task the open-web skill should perform. */
   webTask?: "papers" | "study" | "sites" | "offers" | "summarize";
+  /** True when the ask is a forward to trace. */
+  forwardCheck?: boolean;
+  /** True when a bill photo is attached for scanning. */
+  receiptScan?: boolean;
 }
 
 const RETRIEVAL_PATTERNS: Array<{ kind: RetrievalKind; pattern: RegExp }> = [
@@ -88,6 +93,10 @@ const OFFERS_PATTERN =
   /\b(?:price|prices|cheaper|cheapest|lowest(?:\s+price)?|compare|comparison|deals?|offers?|discount|buy)\b/i;
 export const SUMMARIZE_PATTERN =
   /\b(?:summarise|summarize|summing up|tl;?dr|key points of)\b|\bread\s+(?:this|the)?\s*(?:article|link|page|url)\b/i;
+export const FORWARD_PATTERN =
+  /\b(?:before\s+you\s+forward|check\s+this\s+forward|fact\s?-?check(?:\s+this)?|is\s+this\s+(?:true|real|fake|correct)|fake\s+news|whatsapp\s+forward|forwarded\s+as\s+received|is\s+forward)\b/i;
+export const RECEIPT_PATTERN =
+  /\b(?:receipt|shop\s+bill|scan\s+(?:the\s+)?bill|scan\s+(?:the\s+)?receipt|check\s+(?:the\s+)?(?:bill|receipt|gst)|gstin)\b/i;
 
 export function detectWebTask(message: string): AnswerIntent["webTask"] | undefined {
   if (PAPERS_PATTERN.test(message)) {
@@ -170,7 +179,15 @@ export function detectIntent(
     kinds.push("image");
   }
 
-  return { kinds, topic, explicit, wantsVideo, webTask: detectWebTask(message) };
+  return {
+    kinds,
+    topic,
+    explicit,
+    wantsVideo,
+    webTask: detectWebTask(message),
+    forwardCheck: FORWARD_PATTERN.test(message),
+    receiptScan: RECEIPT_PATTERN.test(message),
+  };
 }
 
 const TYPO_KEYWORDS =
@@ -517,7 +534,11 @@ export function buildPlan(request: AgentRequest): Plan {
   // News is remembered per country: the console asks once, stores the answer,
   // and every later news ask uses it. "News from Japan" states a country and
   // updates the stored one at the same time.
-  const countryMention = detectCountryStatement(message);
+  const placeMention = detectPlaceInText(message);
+  const countryStatement = detectCountryStatement(message);
+  const countryMention = placeMention
+    ? { code: placeMention.place.country }
+    : countryStatement;
   const storedCountry =
     preferences.country ?? preferences.region?.toLowerCase() ?? undefined;
   // Only *news* asks gate on the country question — articles and summaries are
@@ -556,6 +577,23 @@ export function buildPlan(request: AgentRequest): Plan {
       mode: "focused",
       intent,
     };
+  }
+
+  // A forward pasted for checking is the whole job: trace it, nothing else.
+  const forwardAsk = intent.forwardCheck && message.trim().length >= 40;
+  if (forwardAsk) {
+    const checker = getSkill("forward-check");
+    if (checker) {
+      addStep(checker, targetLike(message));
+      return {
+        targets,
+        steps,
+        rationale:
+          "A forward to trace: the chain noise is stripped, the claim is searched across the open web, fact-checkers are consulted, and the verdict — forward, hold, or don't — is shown with the receipts.",
+        mode: "focused",
+        intent,
+      };
+    }
   }
 
   const retrievalOnly = intent.kinds.length > 0 && hardTargets.length === 0;
@@ -625,7 +663,12 @@ export function buildPlan(request: AgentRequest): Plan {
       addRetrieval(
         kind,
         intent.topic,
-        kind === "news" || kind === "article" ? { country: newsCountry ?? "" } : {},
+        kind === "news" || kind === "article"
+          ? {
+              country: newsCountry ?? "",
+              ...(placeMention ? { place: placeMention.matched } : {}),
+            }
+          : {},
       );
     }
 
@@ -863,7 +906,12 @@ export function buildPlan(request: AgentRequest): Plan {
     addRetrieval(
       kind,
       hardTargets[0]?.value ?? intent.topic,
-      kind === "news" || kind === "article" ? { country: newsCountry ?? "" } : {},
+      kind === "news" || kind === "article"
+        ? {
+            country: newsCountry ?? "",
+            ...(placeMention ? { place: placeMention.matched } : {}),
+          }
+        : {},
     );
   }
   if (
@@ -893,6 +941,18 @@ export function buildPlan(request: AgentRequest): Plan {
         confidence: "confirmed",
         meta: { attachments: JSON.stringify(attachments) },
       });
+    }
+    if (intent.receiptScan) {
+      const scanner = getSkill("receipt-scan");
+      if (scanner) {
+        addStep(scanner, {
+          kind: "text",
+          value: attachments.map((item) => item.name).join(", "),
+          raw: message || "receipt",
+          confidence: "confirmed",
+          meta: { attachments: JSON.stringify(attachments) },
+        });
+      }
     }
   }
 

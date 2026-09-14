@@ -6,3 +6,4 @@ allowBuilds:
   sharp: true
   core-js: true
   esbuild: true
+  tesseract.js: set this to true or false

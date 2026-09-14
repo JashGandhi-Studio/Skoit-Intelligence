@@ -239,6 +239,36 @@ export async function relayBytes(
     /* chain continues */
   }
 
+  // Images get one extra, extremely reliable route: the wsrv.nl image proxy
+  // (CORS-open, binary-safe, long-lived). It only ever serves images.
+  if (/\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(url) || /image/i.test(url)) {
+    tried.push("wsrv");
+    try {
+      const bare = url.replace(/^https?:\/\//, "");
+      const response = await timedFetch(
+        `https://wsrv.nl/?url=${encodeURIComponent(bare)}&n=-1`,
+        undefined,
+        options.timeoutMs ?? RELAY_TIMEOUT_MS,
+        options.signal,
+      );
+      if (response.ok) {
+        const buffer = await response.arrayBuffer();
+        if (buffer.byteLength > 0) {
+          return {
+            data: {
+              bytes: new Uint8Array(buffer),
+              mime: response.headers.get("content-type") || "image/jpeg",
+            },
+            via: "wsrv",
+            ms: Date.now() - started,
+          };
+        }
+      }
+    } catch {
+      /* chain continues */
+    }
+  }
+
   for (const relay of RELAYS.filter((item) => !item.textPreferred)) {
     tried.push(relay.label);
     try {

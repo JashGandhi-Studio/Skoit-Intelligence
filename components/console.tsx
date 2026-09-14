@@ -19,6 +19,7 @@ import { Briefing } from "@/components/console/briefing";
 import { CaseSidebar } from "@/components/console/case-sidebar";
 import { Composer, type ComposerSubmission } from "@/components/console/composer";
 import { Guide } from "@/components/console/guide";
+import { ForwardVerdictCard, QuickCards } from "@/components/console/insights";
 import { IntelPanel } from "@/components/console/intel-panel";
 import { PlanCard } from "@/components/console/plan-card";
 import { ResultsGallery } from "@/components/console/results-gallery";
@@ -70,6 +71,15 @@ const STARTERS = [
   {
     label: "Latest news",
     prompt: "Show the latest news",
+  },
+  {
+    label: "Mumbai news",
+    prompt: "Mumbai news today",
+  },
+  {
+    label: "Check a forward",
+    prompt:
+      "Check this forward: RBI is giving every citizen ₹5 lakh under the new deposit scheme, forwarded as received",
   },
   {
     label: "Watch a video",
@@ -1073,6 +1083,9 @@ export function Console() {
                         onOpenViewer={openViewer}
                       />
                     )}
+
+                    <ForwardVerdictCard evidence={turn.evidence} />
+                    <QuickCards turn={turn} />
 
                     {turn.answer ? (
                       <Briefing

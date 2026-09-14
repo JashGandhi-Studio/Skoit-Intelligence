@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Toaster } from "sonner";
+import { InstallBanner, PwaProvider } from "@/components/pwa";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
@@ -9,12 +10,19 @@ export const metadata: Metadata = {
     "An open-source-intelligence console: it collects from real public sources, shows its coverage honestly, and saves every case file locally.",
   applicationName: "SkOiT",
   robots: { index: false, follow: false },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "SkOiT",
+    statusBarStyle: "black-translucent",
+  },
   icons: {
     icon: [
       { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/icon.svg", type: "image/svg+xml", sizes: "any" },
+      { url: "/icon-192.png", type: "image/png", sizes: "192x192" },
+      { url: "/icon-512.png", type: "image/png", sizes: "512x512" },
     ],
-    apple: [{ url: "/icon.svg" }],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180" }],
     shortcut: ["/icon.svg"],
   },
   openGraph: {
@@ -50,7 +58,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="antialiased">
         <ThemeProvider>
+          <PwaProvider />
           {children}
+          <InstallBanner />
           <Toaster position="top-center" toastOptions={{ className: "text-sm" }} />
         </ThemeProvider>
       </body>

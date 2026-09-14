@@ -2,10 +2,14 @@
 
 import {
   FileStack,
+  Forward,
   Globe2,
   Image as ImageIcon,
+  Languages,
+  MapPin,
   Music2,
   QrCode,
+  Receipt,
   ScrollText,
   Search,
   Video,

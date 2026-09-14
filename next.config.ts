@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  serverExternalPackages: ["exifr"],
+  serverExternalPackages: ["exifr", "tesseract.js"],
   // The console is developed through a proxied preview host, so dev asset
   // requests arrive from a different origin than localhost.
   allowedDevOrigins: ["*.e2b.app", "*.vercel.app", "localhost", "127.0.0.1"],

@@ -5,6 +5,7 @@ import { saavnSearch } from "@/lib/client/saavn";
 import { looksLikePdf, type WebResult, webSearch } from "@/lib/client/web-search";
 import { youtubeSearch } from "@/lib/client/youtube";
 import { source } from "@/lib/net/http";
+import { detectPlaceInText, labelOfPlace } from "@/lib/news-places";
 import { evidence } from "@/lib/skills/emit";
 import { AUDIO_KEYWORDS, NEWS_KEYWORDS, VIDEO_KEYWORDS } from "@/lib/skills/retrieval";
 import type {
@@ -305,18 +306,26 @@ export const googleNewsSkill: SkillDefinition = {
       .trim();
     const askQuery = bareTopic.length >= 3 ? bareTopic : undefined;
 
-    ctx.log(`Fetching ${country ?? "world"} news feed`);
+    // City/state scoping beats the country front page: "mumbai news" means
+    // Mumbai, clearly labelled, not the India front page.
+    const place = target.meta?.place
+      ? detectPlaceInText(target.meta.place)
+      : detectPlaceInText(raw);
+    const scopeLabel = place ? labelOfPlace(place.place) : undefined;
+
+    ctx.log(`Fetching ${scopeLabel ?? `${country ?? "world"} news`} feed`);
 
     const src = source(
       "google-news",
-      `Google News — ${country ?? "world"} edition`,
+      `Google News — ${scopeLabel ?? `${country ?? "world"} edition`}`,
       "https://news.google.com",
       "dataset",
     );
     const result = await googleNews({
       topic,
       query: askQuery,
-      countryCode: country,
+      countryCode: place?.place.country ?? country,
+      place: place?.place,
       limit: Math.max(budget(target), 12),
       signal: ctx.signal,
     });
@@ -346,13 +355,15 @@ export const googleNewsSkill: SkillDefinition = {
     const evidenceItems: SkillOutcome["evidence"] = [
       evidence(
         skill,
-        "Edition",
-        `${result.edition.flag} ${result.edition.label} (${result.edition.ceid})`,
+        "Scope",
+        place
+          ? `${result.edition.flag} ${scopeLabel}`
+          : `${result.edition.flag} ${result.edition.label} (${result.edition.ceid})`,
         {
           source: src,
           confidence: "confirmed",
           detail:
-            "News is scoped to this country edition; name another country any time — it is remembered for next time.",
+            "Say a city or state for local news (Mumbai, Maharashtra, New York…), or another country — it is remembered.",
         },
       ),
       evidence(skill, "Items", `${result.articles.length} headline(s), newest first`, {
@@ -376,7 +387,7 @@ export const googleNewsSkill: SkillDefinition = {
 
     return retrievalTargetOutcome({
       status: "ok",
-      summary: `${result.articles.length} latest headline(s) for ${result.edition.label}${askQuery ? ` on “${askQuery}”` : ""}.`,
+      summary: `${result.articles.length} latest headline(s) for ${scopeLabel ?? result.edition.label}${askQuery ? ` on “${askQuery}”` : ""}.`,
       evidence: evidenceItems,
       sources: [src],
       articles: result.articles,
@@ -580,6 +591,8 @@ export const openWebSkill: SkillDefinition = {
       queries.push(raw);
     }
 
+    const structuredMode =
+      mode === "papers" || mode === "study" || mode === "sites" ? mode : undefined;
     const collected: WebResult[] = [];
     for (const query of queries) {
       ctx.log(`Searching: ${query}`);
@@ -604,7 +617,14 @@ export const openWebSkill: SkillDefinition = {
       deduped.sort((a, b) => Number(looksLikePdf(b.url)) - Number(looksLikePdf(a.url)));
     }
 
-    articles = dedupeArticles(deduped.map((result) => webResultToArticle(result, mode)));
+    articles = dedupeArticles(
+      deduped.map((result) => ({
+        ...webResultToArticle(result, mode),
+        ...(structuredMode
+          ? { shelf: structuredMode as "papers" | "study" | "sites" }
+          : {}),
+      })),
+    );
 
     const pdfCount = deduped.filter((result) => looksLikePdf(result.url)).length;
     if (deduped.length > 0) {

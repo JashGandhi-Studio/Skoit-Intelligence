@@ -167,6 +167,8 @@ export interface ArticleItem {
   corroborating?: string[];
   syndicated?: boolean;
   query?: string;
+  /** Structured rendering hint: papers shelf, offers table, forward verdict. */
+  shelf?: "papers" | "study" | "sites" | "offers" | "forward";
 }
 
 export interface AnswerPreferences {
@@ -355,6 +357,7 @@ export interface AttachmentInput {
   exif?: Record<string, string | number | boolean | undefined>;
   exifErrors?: string[];
   textPreview?: string;
+  ocrText?: string;
   coordinates?: { lat: number; lon: number };
   document?: DocumentInfo;
   perceptual?: { ahash: string; dhash: string; width: number; height: number };
