@@ -140,10 +140,16 @@ async function makePdf(pages: number): Promise<Uint8Array> {
 import { buildPlan } from "@/lib/agent/plan";
 import { DEFAULT_ANSWER_PREFERENCES, type AnswerPreferences } from "@/lib/types";
 
-function planOf(message: string, preferences?: Partial<AnswerPreferences>) {
+function planOf(
+  message: string,
+  preferences?: Partial<AnswerPreferences>,
+  _unused?: undefined,
+  history?: Array<{ role: "user" | "assistant"; content: string }>,
+) {
   return buildPlan({
     message,
     preferences: { ...DEFAULT_ANSWER_PREFERENCES, ...preferences },
+    history,
   });
 }
 
@@ -152,7 +158,12 @@ function planOf(message: string, preferences?: Partial<AnswerPreferences>) {
   check("greeting is conversation", greet.smallTalk === "greet" && greet.steps.length === 0);
 
   const newsNoCountry = planOf("show the latest news");
-  check("news asks the country first", newsNoCountry.countryAsk === true && newsNoCountry.steps.length === 0);
+  check(
+    "news with no stored country defaults to the India edition",
+    newsNoCountry.countryAsk !== true &&
+      newsNoCountry.steps.some((step) => step.skillId === "news-google") &&
+      newsNoCountry.steps.find((step) => step.skillId === "news-google")?.meta?.country === "in",
+  );
 
   const newsWithCountry = planOf("show the latest news", { country: "in" });
   check(
@@ -165,6 +176,29 @@ function planOf(message: string, preferences?: Partial<AnswerPreferences>) {
   const newsSwitch = planOf("news from Japan");
   const japanStep = newsSwitch.steps.find((step) => step.skillId === "news-google");
   check("news from <country> scopes the edition", japanStep?.meta?.country === "jp");
+
+  const followUp = planOf(
+    "what about 2027",
+    undefined,
+    undefined,
+    [
+      { role: "user" as const, content: "ICSE class 10 physics specimen paper" },
+      { role: "assistant" as const, content: "Found some papers." },
+    ],
+  );
+  const followUpQuery = followUp.steps[0]?.meta?.query ?? "";
+  check(
+    "follow-up year merges with the previous ask",
+    /2027/.test(followUpQuery) && /physics/i.test(followUpQuery) && followUp.steps.length > 0,
+  );
+
+  const standaloneYear = planOf("news", undefined, undefined, [
+    { role: "user" as const, content: "ICSE class 10 physics specimen paper" },
+  ]);
+  check(
+    "a self-contained short ask never merges",
+    standaloneYear.steps.some((step) => step.skillId === "news-google"),
+  );
 
   const song = planOf("play the song Kesariya by Arijit Singh");
   check(

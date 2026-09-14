@@ -198,8 +198,10 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
   const mapRef = useRef<MlMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
   const tileErrorsRef = useRef(0);
+  const activeStyleRef = useRef<"carto" | "osm" | "vector">("carto");
   const [ready, setReady] = useState(false);
   const [tilesStalled, setTilesStalled] = useState(false);
+  const [noWebgl, setNoWebgl] = useState(false);
   const [globe, setGlobe] = useState(true);
   const [query, setQuery] = useState(initialQuery ?? "");
   const [searching, setSearching] = useState(false);
@@ -214,8 +216,23 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
       return;
     }
 
+    // maplibre-gl needs WebGL. When the browser (or the machine driving it)
+    // cannot provide a context, say so plainly instead of leaving an empty
+    // dark panel where the globe should be.
+    try {
+      const probe = document.createElement("canvas");
+      if (!probe.getContext("webgl2") && !probe.getContext("webgl")) {
+        setNoWebgl(true);
+        return;
+      }
+    } catch {
+      setNoWebgl(true);
+      return;
+    }
+
     let cancelled = false;
     tileErrorsRef.current = 0;
+    activeStyleRef.current = "carto";
     const map = new maplibregl.Map({
       container,
       style: rasterStyle("carto"),
@@ -255,7 +272,21 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     // If the primary tiles keep erroring, quietly fall back to OSM's own
     // tiles; if those fail too, say so instead of showing a dead globe.
     map.on("error", (event: ErrorEvent) => {
-      if (cancelled || !("sourceId" in event) || event.sourceId !== "basemap") {
+      if (cancelled) {
+        return;
+      }
+      // A broken style upgrade (mangled JSON, unreachable glyphs) must never
+      // leave a blank dark globe: revert to the raster basemap that worked.
+      if (
+        !("sourceId" in event) &&
+        !("tile" in event) &&
+        activeStyleRef.current === "vector"
+      ) {
+        activeStyleRef.current = "carto";
+        map.setStyle(rasterStyle("carto"));
+        return;
+      }
+      if ("sourceId" in event && event.sourceId !== "basemap") {
         return;
       }
       tileErrorsRef.current += 1;
@@ -268,22 +299,36 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
       }
     });
 
-    // Try to upgrade to the vector style (better labels, smoother zoom) via
-    // the relay chain. The raster map above is already usable, so any
-    // failure here is silent by design.
+    // Upgrade to the vector style (better labels, smoother zoom) — fetched
+    // DIRECTLY, never through a CORS relay: relays can return mangled JSON,
+    // and a malformed style was silently repainting the globe as an empty
+    // dark ball. The style is validated before it is applied, and any style
+    // error afterwards reverts to the raster map above.
     (async () => {
-      const result = await relayJson(VECTOR_STYLE_URL, {
-        timeoutMs: 9000,
-      }).catch(() => null);
-      if (!result || !isRelayOk(result) || cancelled || typeof result.data !== "object") {
-        return;
-      }
-      const style = result.data as Record<string, unknown>;
-      style.projection = { type: "globe" };
       try {
-        map.setStyle(style as unknown as StyleSpecification);
+        const response = await fetch(VECTOR_STYLE_URL, { cache: "no-store" });
+        if (!response.ok || cancelled) {
+          return;
+        }
+        const style = (await response.json()) as Record<string, unknown>;
+        const usable =
+          typeof style === "object" &&
+          style !== null &&
+          Array.isArray(style.layers) &&
+          style.layers.length > 0 &&
+          typeof style.sources === "object" &&
+          style.sources !== null &&
+          // Glyphs and sprites must be direct URLs the browser can reach.
+          (!("glyphs" in style) ||
+            (typeof style.glyphs === "string" && style.glyphs.startsWith("http")));
+        if (!usable || cancelled) {
+          return;
+        }
+        style.projection = { type: "globe" };
+        activeStyleRef.current = "vector";
+        map.setStyle(style as unknown as StyleSpecification, { diff: false });
       } catch {
-        /* keep the raster map */
+        /* keep the raster map — it is already usable */
       }
     })();
 
@@ -298,8 +343,10 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
   }, []);
 
   /* ------------------------------------------------------- tap for a place */
+  // Re-runs when `ready` flips: that is the moment the map object exists.
+  const currentMap = ready ? mapRef.current : null;
   useEffect(() => {
-    const map = mapRef.current;
+    const map = currentMap;
     if (!map) {
       return;
     }
@@ -340,7 +387,7 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     return () => {
       map.off("click", onClick);
     };
-  }, [ready]);
+  }, [currentMap]);
 
   const dropMarker = useCallback((lat: number, lon: number) => {
     const map = mapRef.current;
@@ -444,6 +491,31 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
   return (
     <div className="relative h-full w-full overflow-hidden bg-surface-2">
       <div ref={containerRef} className="absolute inset-0" />
+
+      {noWebgl ? (
+        <div className="absolute inset-0 grid place-items-center p-6 text-center">
+          <div className="max-w-[320px] space-y-2 rounded-xl border border-hairline bg-surface p-4 shadow-pop">
+            <AlertTriangle className="mx-auto size-5 text-warning" />
+            <p className="text-[13px] font-semibold text-foreground">
+              This browser cannot draw the globe
+            </p>
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              The 3D map needs hardware graphics (WebGL), which is switched off or
+              unavailable here. Enable hardware acceleration in the browser settings — or
+              open{" "}
+              <a
+                href="https://www.openstreetmap.org/"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-primary-strong underline underline-offset-2"
+              >
+                OpenStreetMap
+              </a>{" "}
+              directly.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {/* search + controls overlay */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-2 p-2.5">

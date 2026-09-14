@@ -45,19 +45,22 @@ export async function analyseAttachment(
   const skillId = "attachment-review";
 
   if (file.size > MAX_ATTACHMENT_BYTES) {
+    // Large files still attach and stay viewable/downloadable in the console —
+    // only the local byte-level analysis (hashes, EXIF, entropy) is skipped.
     return {
       name: file.name,
       type: file.type,
       sizeBytes: file.size,
       hasExif: false,
-      summary: `Skipped: ${(file.size / 1024 / 1024).toFixed(1)} MB exceeds the 8 MB analysis limit.`,
+      previewUrl: URL.createObjectURL(file),
+      summary: `Attached without analysis: ${(file.size / 1024 / 1024).toFixed(1)} MB exceeds the ${(MAX_ATTACHMENT_BYTES / 1024 / 1024).toFixed(0)} MB analysis limit.`,
       evidence: [
         {
           id: newId("ev"),
           skillId,
           kind: "warning",
-          label: "File too large",
-          value: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+          label: "File too large to analyse",
+          value: `${(file.size / 1024 / 1024).toFixed(1)} MB — attached, not analysed`,
           confidence: "confirmed",
           observedAt: Date.now(),
         },
@@ -119,8 +122,12 @@ export async function analyseAttachment(
     evidence,
   };
 
+  // Every attached file gets a local blob URL so it can be opened in the
+  // console's viewer — audio, video, PDF, anything the browser can show.
+  payload.previewUrl = URL.createObjectURL(file);
+
   if (file.type.startsWith("image/")) {
-    payload.previewUrl = URL.createObjectURL(file);
+    payload.previewUrl = payload.previewUrl ?? URL.createObjectURL(file);
     const perceptual = await perceptualHashes(file);
     if (perceptual) {
       payload.perceptual = perceptual;

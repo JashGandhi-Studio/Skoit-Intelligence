@@ -100,7 +100,14 @@ export function Tab({
 
 export function TabContent({ value, children }: { value: string; children: ReactNode }) {
   return (
-    <TabsPrimitive.Content value={value} className="outline-none">
+    // flex-1 + min-h-0 is what makes the inner ScrollArea actually scroll:
+    // without a bounded height the content list overflows the panel instead.
+    // Inactive tab content is unmounted by Radix, so this never fights for
+    // space with the other tabs.
+    <TabsPrimitive.Content
+      value={value}
+      className="min-h-0 flex-1 overflow-hidden outline-none"
+    >
       {children}
     </TabsPrimitive.Content>
   );

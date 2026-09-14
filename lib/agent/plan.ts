@@ -17,6 +17,7 @@ import type {
   TargetKind,
 } from "@/lib/types";
 import { DEFAULT_ANSWER_PREFERENCES } from "@/lib/types";
+import { truncate } from "@/lib/utils";
 
 export type RetrievalKind = "image" | "video" | "audio" | "news" | "article";
 
@@ -196,7 +197,7 @@ const TYPO_KEYWORDS =
 const SEARCH_KEYWORDS =
   /(news|search|google|find|mention|press|article|reported|coverage)/i;
 const FULL_SWEEP =
-  /(full|deep|everything|all skills|complete|exhaustive|sweep everything)/i;
+  /\b(?:full\s+sweep|deep\s+sweep|sweep\s+everything|all\s+skills|run\s+everything|everything\s+you\s+(?:have|got)|exhaustive\s+(?:check|sweep|search|scan))\b/i;
 
 const RETRIEVAL_SKILL_IDS = new Set([
   "image-search",
@@ -222,6 +223,87 @@ const RETRIEVAL_SKILLS_FOR: Record<RetrievalKind, string[]> = {
 };
 
 export type SmallTalkMood = "greet" | "thanks" | "capability";
+
+/* --------------------------------------------------------------- context -- */
+
+/**
+ * Follow-up asks — "what about 2027?", "the latest one", "hindi mein" — only
+ * make sense against what was asked before. The planner therefore resolves a
+ * short continuation against the previous question in this case, so the same
+ * retrieval chain runs over the *merged* subject instead of searching for the
+ * bare word "2027".
+ */
+const CONTINUATION_CUES =
+  /^(?:\s*(?:and|also|plus|or)\s+|\s*what\s+about\s+|\s*how\s+about\s+|\s*what\s+of\s+|\s*ab\s+)/i;
+const FRAGMENT_ONLY =
+  /^(?:what\s+about|how\s+about|what\s+of|and|also|the|a|an|latest|newest|recent|new|old|older|previous|previous one|next|same|again|more|some more|another|hindi|english|marathi|tamil|telugu|bengali|kannada|malayalam|gujarati|punjabi|urdu|solutions?|with\s+solutions?|answer\s+key|pdf|in\s+pdf|hindi\s+mein|in\s+hindi)\b[\s\S]{0,40}$/i;
+const YEAR_FRAGMENT =
+  /^(?:what\s+about\s+|how\s+about\s+|for\s+)?(?:the\s+)?(?:latest\s+|newest\s+|new\s+|fresh\s+)?(?:19|20)\d{2}\s*(?:s\b|board)?\b.{0,30}$/i;
+const SHORT_QUALIFIER = /^(?:19|20)\d{2}\b/i;
+
+/** The most recent user ask in the conversation, if any. */
+function previousUserAsk(
+  history: AgentRequest["history"],
+): { question: string; topic: string } | undefined {
+  const turns = history ?? [];
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const entry = turns[index];
+    if (entry.role === "user" && entry.content.trim().length >= 6) {
+      const question = entry.content.trim().slice(0, 300);
+      return { question, topic: cleanTopic(question) };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Detects a follow-up fragment and merges it with the previous question.
+ * Guarded carefully: a self-contained short ask ("latest news", "411001") must
+ * never be swallowed by the previous topic.
+ */
+export function resolveContinuation(
+  message: string,
+  history: AgentRequest["history"],
+): { message: string; continuedFrom?: string } {
+  const trimmed = message.trim();
+  if (trimmed.length === 0 || trimmed.length > 80) {
+    return { message };
+  }
+  const previous = previousUserAsk(history);
+  if (!previous || previous.topic.length < 4) {
+    return { message };
+  }
+
+  const stripped = trimmed
+    .replace(CONTINUATION_CUES, "")
+    .replace(/[\s?.!]+$/, "")
+    .trim();
+  if (stripped.length === 0 || stripped.length > 60) {
+    return { message };
+  }
+
+  const bareWords = stripped.split(/\s+/);
+  const selfContained =
+    /\b(news|song|gaana|video|image|photo|tasveer|headlines?|samachar|khabar|domain|ip|email|phone|plate|pin|hash)\b/i.test(
+      stripped,
+    ) || detectTargets(stripped).some((target) => target.kind !== "text");
+  // A short ask naming its own medium or a hard target stands on its own.
+  if (selfContained && !YEAR_FRAGMENT.test(stripped) && !FRAGMENT_ONLY.test(stripped)) {
+    return { message };
+  }
+
+  const isFragment =
+    YEAR_FRAGMENT.test(stripped) ||
+    FRAGMENT_ONLY.test(stripped) ||
+    SHORT_QUALIFIER.test(stripped) ||
+    (bareWords.length <= 4 && CONTINUATION_CUES.test(trimmed));
+  if (!isFragment) {
+    return { message };
+  }
+
+  const merged = `${previous.topic} ${stripped}`.replace(/\s+/g, " ").trim();
+  return { message: merged, continuedFrom: previous.question };
+}
 
 /** Messages that are just a greeting or a thank-you — not a request yet. */
 const SMALL_TALK =
@@ -464,7 +546,22 @@ export interface Plan {
 }
 
 export function buildPlan(request: AgentRequest): Plan {
-  const message = request.message ?? "";
+  const rawMessage = request.message ?? "";
+  const resolved = resolveContinuation(rawMessage, request.history);
+  const plan = planFromMessage(request, resolved);
+  if (resolved.continuedFrom) {
+    // Say plainly that this run continued the previous ask, so the analyst
+    // can see why the results cover the wider subject.
+    plan.rationale = `Follow-up on “${truncate(resolved.continuedFrom, 70)}” — your short ask was merged with that subject and searched together. ${plan.rationale}`;
+  }
+  return plan;
+}
+
+function planFromMessage(
+  request: AgentRequest,
+  resolved: { message: string; continuedFrom?: string },
+): Plan {
+  const message = resolved.message;
   const attachments = request.attachments ?? [];
   const detected = detectTargets(message);
   const extras = textDerivedTargets(message);
@@ -542,10 +639,10 @@ export function buildPlan(request: AgentRequest): Plan {
     : countryStatement;
   const storedCountry =
     preferences.country ?? preferences.region?.toLowerCase() ?? undefined;
-  // Only *news* asks gate on the country question — articles and summaries are
-  // web reading, not a front page, and must never be blocked by a dialog.
-  const newsWanted = intent.kinds.includes("news") && intent.webTask === undefined;
-  const newsCountry = countryMention?.code ?? storedCountry;
+  // No country stored yet? The console starts from the India edition (this
+  // console is India-first) instead of blocking the ask behind a question —
+  // the scope row in the answer says how to switch.
+  const newsCountry = countryMention?.code ?? storedCountry ?? "in";
 
   const talk =
     targets.length === 0 && intent.kinds.length === 0
@@ -568,17 +665,8 @@ export function buildPlan(request: AgentRequest): Plan {
     };
   }
 
-  if (newsWanted && !newsCountry && intent.webTask === undefined) {
-    return {
-      targets,
-      steps: [],
-      countryAsk: true,
-      rationale:
-        "A news ask needs a country, and none is stored yet — the console asks rather than assuming. Once answered it is remembered for every later news run.",
-      mode: "focused",
-      intent,
-    };
-  }
+  // (A news ask never blocks on a country question anymore: with nothing
+  // stored the India edition is used and the answer says how to switch.)
 
   // A forward pasted for checking is the whole job: trace it, nothing else.
   const forwardAsk = intent.forwardCheck && message.trim().length >= 40;

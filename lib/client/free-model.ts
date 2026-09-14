@@ -131,24 +131,36 @@ export async function writeWithFreeModel(
     return { error: "nothing collected to write up" };
   }
 
-  const puter = await loadScript();
-  if (!puter?.ai?.chat) {
-    return {
-      error:
-        "the free model script (js.puter.com) could not be loaded from this browser — it may be blocked by a network policy or an extension",
-    };
-  }
-
-  const instructions = isRetrievalAsk(bundle)
-    ? RETRIEVAL_INSTRUCTIONS
-    : style === "analyst"
-      ? SYNTHESIS_INSTRUCTIONS
-      : PLAIN_INSTRUCTIONS;
-
+  // The whole pass is a bonus on top of the deterministic answer that already
+  // exists — it is hard-capped so a slow endpoint can never hold the run
+  // open past the console's speed promise.
   try {
-    const response = await puter.ai.chat(
-      `${instructions}\n\n${buildModelPrompt(bundle, risk)}`,
-    );
+    const puter = await loadScript();
+    if (!puter?.ai?.chat) {
+      return {
+        error:
+          "the free model script (js.puter.com) could not be loaded from this browser — it may be blocked by a network policy or an extension",
+      };
+    }
+
+    const instructions = isRetrievalAsk(bundle)
+      ? RETRIEVAL_INSTRUCTIONS
+      : style === "analyst"
+        ? SYNTHESIS_INSTRUCTIONS
+        : PLAIN_INSTRUCTIONS;
+
+    const response = await Promise.race([
+      puter.ai.chat(`${instructions}\n\n${buildModelPrompt(bundle, risk)}`),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error("the free model took too long — kept the built-in briefing"),
+            ),
+          12_000,
+        ),
+      ),
+    ]);
     const text = textOf(response);
     return text ? { text } : { error: "the free model returned nothing usable" };
   } catch (error) {

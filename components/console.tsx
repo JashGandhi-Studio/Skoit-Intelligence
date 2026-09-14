@@ -2,7 +2,6 @@
 
 import {
   ChevronDown,
-  Globe2,
   Info,
   Menu,
   Moon,
@@ -193,7 +192,10 @@ export function Console() {
     hydrated,
   } = useCases();
   const { theme, toggle } = useTheme();
-  const [turns, setTurns] = useState<TurnView[]>([]);
+  // Live turns are kept PER CASE: opening another case (and coming back)
+  // never wipes what a case was showing or collecting. A run keeps filling
+  // its own case's view even while another case is on screen.
+  const [turnsByCase, setTurnsByCase] = useState<Record<string, TurnView[]>>({});
   const [busy, setBusy] = useState(false);
   const [egress, setEgress] = useState<boolean | null>(null);
   const [modelLabel, setModelLabel] = useState<string | null>(null);
@@ -221,6 +223,22 @@ export function Console() {
 
   const skills = useMemo(() => manifest(), []);
 
+  const activeCaseId = activeId ?? null;
+  const turns = useMemo(
+    () => (activeCaseId ? (turnsByCase[activeCaseId] ?? []) : []),
+    [activeCaseId, turnsByCase],
+  );
+  /** Update one case's live view. Runs never touch another case's view. */
+  const setTurnsFor = useCallback(
+    (caseId: string, updater: (current: TurnView[]) => TurnView[]) => {
+      setTurnsByCase((current) => ({
+        ...current,
+        [caseId]: updater(current[caseId] ?? []),
+      }));
+    },
+    [],
+  );
+
   // Hydrate the saved turns when a *different* case is opened. Keyed on the id so
   // that saving mid-run (which replaces the case object) never clears the live view.
   useEffect(() => {
@@ -232,20 +250,40 @@ export function Console() {
     });
   }, []);
 
+  // Opening a case seeds its live view from the saved turns — but ONLY the
+  // first time it is opened, and never over a view that already holds a live
+  // or hydrated run. Coming back to a case therefore shows everything it had.
   useEffect(() => {
     if (!active) {
-      if (hydratedCaseRef.current !== null) {
-        hydratedCaseRef.current = null;
-        setTurns([]);
-      }
       return;
     }
     if (hydratedCaseRef.current === active.id) {
       return;
     }
     hydratedCaseRef.current = active.id;
-    setTurns(active.turns.map(TurnViewFromSaved));
+    setTurnsByCase((current) => {
+      if (current[active.id]) {
+        return current;
+      }
+      return { ...current, [active.id]: active.turns.map(TurnViewFromSaved) };
+    });
   }, [active]);
+
+  // Drop the live view of a deleted case so it cannot leak back on re-create.
+  useEffect(() => {
+    const ids = new Set(cases.map((item) => item.id));
+    setTurnsByCase((current) => {
+      const stale = Object.keys(current).filter((id) => !ids.has(id));
+      if (stale.length === 0) {
+        return current;
+      }
+      const next = { ...current };
+      for (const id of stale) {
+        delete next[id];
+      }
+      return next;
+    });
+  }, [cases]);
 
   useEffect(() => {
     fetch("/api/capabilities")
@@ -273,11 +311,14 @@ export function Console() {
     }
   }, []);
 
-  const patchTurn = useCallback((turnId: string, event: AgentEvent) => {
-    setTurns((current) =>
-      current.map((turn) => (turn.id === turnId ? applyEvent(turn, event) : turn)),
-    );
-  }, []);
+  const patchTurn = useCallback(
+    (caseId: string, turnId: string, event: AgentEvent) => {
+      setTurnsFor(caseId, (current) =>
+        current.map((turn) => (turn.id === turnId ? applyEvent(turn, event) : turn)),
+      );
+    },
+    [setTurnsFor],
+  );
 
   const persistTurn = useCallback(
     (caseId: string, turn: TurnView) => {
@@ -378,7 +419,7 @@ export function Console() {
         notices: [],
       };
 
-      setTurns((current) => [...current, turn]);
+      setTurnsFor(caseFile.id, (current) => [...current, turn]);
       setBusy(true);
       startedRef.current = Date.now();
       setElapsed(0);
@@ -399,7 +440,7 @@ export function Console() {
         attachments: submission.attachments?.map(
           ({ previewUrl: _previewUrl, ...rest }) => rest,
         ),
-        history: turns
+        history: (turnsByCase[caseFile.id] ?? [])
           .slice(-4)
           .flatMap((item) => [
             { role: "user" as const, content: item.question },
@@ -448,7 +489,7 @@ export function Console() {
               continue;
             }
             try {
-              patchTurn(turn.id, JSON.parse(line) as AgentEvent);
+              patchTurn(caseFile.id, turn.id, JSON.parse(line) as AgentEvent);
             } catch {
               /* partial line — the next chunk completes it */
             }
@@ -456,7 +497,7 @@ export function Console() {
         }
       } catch (error) {
         if ((error as Error).name !== "AbortError") {
-          patchTurn(turn.id, {
+          patchTurn(caseFile.id, turn.id, {
             type: "notice",
             level: "error",
             message: `Server collection failed (${
@@ -468,7 +509,7 @@ export function Console() {
 
       // Browser pass: covers both "server has no egress" and "server route down".
       const snapshot = await new Promise<TurnView | null>((resolve) => {
-        setTurns((current) => {
+        setTurnsFor(caseFile.id, (current) => {
           resolve(current.find((item) => item.id === turn.id) ?? null);
           return current;
         });
@@ -499,7 +540,7 @@ export function Console() {
           stepIds[`${step.skillId}::${step.target}`] = step.stepId;
           stepIds[step.skillId] = step.stepId;
         }
-        patchTurn(turn.id, {
+        patchTurn(caseFile.id, turn.id, {
           type: "notice",
           level: "info",
           message: `Browser-side pass running for ${fallbackSkillIds.length} skill(s): ${fallbackSkillIds.join(", ")}.`,
@@ -517,7 +558,7 @@ export function Console() {
               return;
             }
             // The runner resolved the step id through the plan mapping already.
-            patchTurn(turn.id, event);
+            patchTurn(caseFile.id, turn.id, event);
           },
           signal: controller.signal,
           onlySkillIds: fallbackSkillIds,
@@ -525,7 +566,7 @@ export function Console() {
         }).catch(() => undefined);
         browserRan = true;
 
-        setTurns((current) =>
+        setTurnsFor(caseFile.id, (current) =>
           current.map((item) =>
             item.id === turn.id ? { ...item, clientPassRan: true } : item,
           ),
@@ -536,7 +577,7 @@ export function Console() {
       // write-up must describe everything that was collected — and nothing more.
       // A run that collected nothing says so instead of trailing off.
       const settled = await new Promise<TurnView | null>((resolve) => {
-        setTurns((current) => {
+        setTurnsFor(caseFile.id, (current) => {
           resolve(current.find((item) => item.id === turn.id) ?? null);
           return current;
         });
@@ -551,14 +592,14 @@ export function Console() {
           const mergedRisk = assessRisk(bundle);
 
           if (gained > 0) {
-            patchTurn(turn.id, {
+            patchTurn(caseFile.id, turn.id, {
               type: "notice",
               level: "info",
               message: `Browser pass added ${gained} finding(s) — risk re-scored over ${settled.evidence.length} merged observation(s).`,
             });
           }
 
-          setTurns((current) =>
+          setTurnsFor(caseFile.id, (current) =>
             current.map((item) =>
               item.id === turn.id
                 ? {
@@ -593,7 +634,7 @@ export function Console() {
       // wrote this run, and there is real evidence to write up. The script loads
       // lazily and any failure leaves the built-in answer standing.
       const written = await new Promise<TurnView | null>((resolve) => {
-        setTurns((current) => {
+        setTurnsFor(caseFile.id, (current) => {
           resolve(current.find((item) => item.id === turn.id) ?? null);
           return current;
         });
@@ -614,7 +655,7 @@ export function Console() {
           controller.signal,
         );
         if (free.text) {
-          setTurns((current) =>
+          setTurnsFor(caseFile.id, (current) =>
             current.map((item) =>
               item.id === turn.id
                 ? {
@@ -626,14 +667,14 @@ export function Console() {
                 : item,
             ),
           );
-          patchTurn(turn.id, {
+          patchTurn(caseFile.id, turn.id, {
             type: "notice",
             level: "info",
             message:
               "Briefing written by the free browser model over the collected evidence — sources and findings are unchanged.",
           });
         } else if (free.error) {
-          patchTurn(turn.id, {
+          patchTurn(caseFile.id, turn.id, {
             type: "notice",
             level: "info",
             message: `Built-in writer used — ${free.error}.`,
@@ -645,7 +686,7 @@ export function Console() {
       abortRef.current = null;
 
       const finished = await new Promise<TurnView | null>((resolve) => {
-        setTurns((current) => {
+        setTurnsFor(caseFile.id, (current) => {
           resolve(current.find((item) => item.id === turn.id) ?? null);
           return current;
         });
@@ -661,8 +702,9 @@ export function Console() {
       createCase,
       patchTurn,
       persistTurn,
+      setTurnsFor,
       skills,
-      turns,
+      turnsByCase,
       updateCase,
       preferences,
     ],
@@ -754,7 +796,6 @@ export function Console() {
           onSelect={selectCase}
           onCreate={() => {
             createCase();
-            setTurns([]);
           }}
           onDelete={deleteCase}
           onTogglePin={(caseFile) =>
@@ -1162,6 +1203,16 @@ export function Console() {
               onStop={stop}
               busy={busy}
               manifest={skills}
+              onPreviewFile={(file) => {
+                if (file.previewUrl) {
+                  openViewer({
+                    type: "file",
+                    name: file.name,
+                    url: file.previewUrl,
+                    mime: file.type,
+                  });
+                }
+              }}
             />
             {lastNotice ? (
               <p className="pb-2 text-[11px] text-faint-foreground">

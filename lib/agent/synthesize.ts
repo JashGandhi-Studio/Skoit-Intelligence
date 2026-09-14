@@ -419,12 +419,31 @@ export function plainBriefing(bundle: AnalysisBundle, risk: RiskAssessment): str
 
   if (bundle.sources.length > 0) {
     lines.push("", "### Where this came from");
-    bundle.sources.slice(0, 14).forEach((sourceRef, index) => {
-      const number = citations.get(sourceRef.id) ?? index + 1;
+    // A quiet pointer, not a link dump: name the engines and cite one or two
+    // concrete origins. The full list stays a tap away — "Cited sources"
+    // below and the Sources tab — without a wall of raw URLs in the reading
+    // path.
+    const linkable = bundle.sources.filter((sourceRef) => Boolean(sourceRef.url));
+    const named = bundle.sources
+      .slice(0, 3)
+      .map((sourceRef) => sourceRef.label)
+      .join(" · ");
+    lines.push(`- Sources consulted: ${named}.`);
+    for (const sourceRef of linkable.slice(0, 2)) {
+      const number = citations.get(sourceRef.id);
+      let host = "";
+      try {
+        host = sourceRef.url ? new URL(sourceRef.url).hostname.replace(/^www\./, "") : "";
+      } catch {
+        host = "";
+      }
+      lines.push(`- [${number ?? 1}] ${sourceRef.label}${host ? ` — ${host}` : ""}`);
+    }
+    if (bundle.sources.length > 3) {
       lines.push(
-        `- [${number}] ${sourceRef.label}${sourceRef.url ? ` — ${sourceRef.url}` : ""}`,
+        `- All ${bundle.sources.length} source(s) are listed under **Cited sources** below.`,
       );
-    });
+    }
   }
 
   if (bundle.entities.length > 0) {
@@ -772,7 +791,7 @@ Output markdown with these sections, in this order, and omit any section with no
 ### What we found            (bulleted; each line starts with the thing found, then what it is, then [source])
 ### What it means            (only the points that change how the reader should act; plain consequences)
 ### What we could not check  (which sources did not answer, and what that does and does not imply)
-### Where this came from     (numbered sources with URLs)
+### Where this came from     (name the engines used + at most 2 concrete sources; never dump every link — the full list lives in "Cited sources")
 
 Match length to the question. A request for an image, a song or a news item is answered in a few lines —
 name what was found, where it came from and its licence, and mark single-source reporting as unconfirmed.`;

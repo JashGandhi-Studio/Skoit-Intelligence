@@ -254,3 +254,66 @@ function labelForPlace(place: NewsPlace): string {
   }
   return parts.join(" · ");
 }
+
+/**
+ * Bing News RSS — the second engine. When Google's feed will not come through
+ * (blocked relay, rate limit, captive portal), the news ask still answers from
+ * here instead of dying. Same discipline: real publisher links, real dates.
+ */
+export async function bingNewsSearch(options: {
+  query?: string;
+  countryCode?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}): Promise<{ articles: ArticleItem[]; via: string; error?: string }> {
+  const edition = editionByCode(options.countryCode ?? "") ?? editionByCode("world");
+  const market = edition?.gl ?? "IN";
+  const base = options.query?.trim()
+    ? `https://www.bing.com/news/search?q=${encodeURIComponent(options.query.trim())}`
+    : "https://www.bing.com/news/search?q=top+stories";
+  const url = `${base}&format=RSS&setmkt=${market === "IN" ? "en-IN" : `en-${market}`}`;
+
+  const fetched = await relayText(url, {
+    accept: "application/rss+xml, application/xml, text/xml, */*",
+    skipDirect: true,
+    timeoutMs: 12_000,
+    signal: options.signal,
+  });
+  if (!isRelayOk(fetched)) {
+    return { articles: [], via: "none", error: fetched.error };
+  }
+  if (!/<rss|<item/i.test(fetched.data)) {
+    return { articles: [], via: fetched.via, error: "the response was not a news feed" };
+  }
+
+  const articles: ArticleItem[] = parseItems(fetched.data)
+    .map((item) => {
+      const { headline, source } = splitTitle(item.title, item.sourceName);
+      const realUrl =
+        item.articleUrl && /^https?:\/\//.test(item.articleUrl)
+          ? item.articleUrl
+          : item.link;
+      const domain = realUrl ? hostOf(realUrl) : "bing.com";
+      return {
+        id: newId("bn"),
+        title: headline,
+        url: realUrl || item.link,
+        domain,
+        source: source ?? domain,
+        snippet: stripTags(decodeEntities(item.description)).slice(0, 280) || undefined,
+        publishedAt: item.pubDate,
+        imageUrl: item.imageUrl,
+        country: edition?.code,
+        language: edition?.hl.split("-")[0] ?? "en",
+      } satisfies ArticleItem;
+    })
+    .filter((article) => article.title.length > 2 && /^https?:\/\//.test(article.url));
+
+  const deduped = Array.from(
+    new Map(articles.map((article) => [article.url, article])).values(),
+  )
+    .sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
+    .slice(0, options.limit ?? 24);
+
+  return { articles: deduped, via: fetched.via };
+}

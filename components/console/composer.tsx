@@ -49,12 +49,15 @@ export function Composer({
   busy,
   manifest,
   className,
+  onPreviewFile,
 }: {
   onSubmit: (submission: ComposerSubmission) => void;
   onStop: () => void;
   busy: boolean;
   manifest: SkillManifestEntry[];
   className?: string;
+  /** Tap an attached file to open it in the viewer. */
+  onPreviewFile?: (file: { name: string; type?: string; previewUrl?: string }) => void;
 }) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<
@@ -153,19 +156,32 @@ export function Composer({
                 key={file.name}
                 className="group flex items-center gap-2 rounded-lg border border-hairline bg-surface-2 py-1 pr-1 pl-1.5"
               >
-                {file.previewUrl ? (
-                  // biome-ignore lint/performance/noImgElement: local blob preview of the analyst's own file
-                  <img
-                    src={file.previewUrl}
-                    alt={`Preview of ${file.name}`}
-                    className="size-7 rounded object-cover"
-                  />
-                ) : (
-                  <Paperclip className="size-3.5 text-faint-foreground" />
-                )}
-                <span className="max-w-[150px] truncate text-[11.5px] text-foreground">
-                  {file.name}
-                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onPreviewFile?.({
+                      name: file.name,
+                      type: file.type,
+                      previewUrl: file.previewUrl,
+                    })
+                  }
+                  className="flex min-w-0 items-center gap-2"
+                  aria-label={`Open ${file.name} in the viewer`}
+                >
+                  {file.previewUrl && file.type?.startsWith("image/") ? (
+                    // biome-ignore lint/performance/noImgElement: local blob preview of the analyst's own file
+                    <img
+                      src={file.previewUrl}
+                      alt={`Preview of ${file.name}`}
+                      className="size-7 rounded object-cover"
+                    />
+                  ) : (
+                    <Paperclip className="size-3.5 text-faint-foreground" />
+                  )}
+                  <span className="max-w-[150px] truncate text-[11.5px] text-foreground underline-offset-2 group-hover:underline">
+                    {file.name}
+                  </span>
+                </button>
                 {file.coordinates ? (
                   <Badge tone="warning" mono>
                     gps
@@ -218,11 +234,14 @@ export function Composer({
               ref={fileRef}
               type="file"
               multiple
-              accept="image/*,text/*,.json,.csv,.log,.md,.eml,.pdf"
+              // Every format is welcome — mp3, mp4, png, pdf, zip, anything.
+              // The heavy analysis (EXIF, documents) adapts to what arrives;
+              // whatever it is, it can be attached and opened in the viewer.
+              accept="*/*"
               className="hidden"
               onChange={(event) => handleFiles(event.target.files)}
             />
-            <Tip label="Attach a file — EXIF, hashes and entropy are read locally in this browser">
+            <Tip label="Attach any file — EXIF, hashes and entropy are read locally in this browser">
               <Button
                 variant="ghost"
                 size="icon"

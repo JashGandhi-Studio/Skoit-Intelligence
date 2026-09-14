@@ -1,8 +1,13 @@
 import { isRelayOk, relayText } from "@/lib/client/cors-fetch";
-import { googleNews, type NewsTopic } from "@/lib/client/google-news";
+import { bingNewsSearch, googleNews, type NewsTopic } from "@/lib/client/google-news";
 import { keyPointsOf, readArticle } from "@/lib/client/reader";
 import { saavnSearch } from "@/lib/client/saavn";
-import { looksLikePdf, type WebResult, webSearch } from "@/lib/client/web-search";
+import {
+  looksLikePdf,
+  type WebResult,
+  type WebSearchOutcome,
+  webSearch,
+} from "@/lib/client/web-search";
 import { youtubeSearch } from "@/lib/client/youtube";
 import { source } from "@/lib/net/http";
 import { detectPlaceInText, labelOfPlace } from "@/lib/news-places";
@@ -330,7 +335,19 @@ export const googleNewsSkill: SkillDefinition = {
       signal: ctx.signal,
     });
 
+    // Second engine: when Google's feed will not come through, Bing News RSS
+    // answers the same ask instead of the run dying with an unreachable step.
+    let bingFallback: Awaited<ReturnType<typeof bingNewsSearch>> | undefined;
     if (result.articles.length === 0) {
+      bingFallback = await bingNewsSearch({
+        query: askQuery,
+        countryCode: place?.place.country ?? country,
+        limit: Math.max(budget(target), 12),
+        signal: ctx.signal,
+      });
+    }
+
+    if (result.articles.length === 0 && (bingFallback?.articles.length ?? 0) === 0) {
       return retrievalTargetOutcome({
         status: "unreachable",
         summary: `No news came back for the ${result.edition.label} edition.`,
@@ -339,7 +356,9 @@ export const googleNewsSkill: SkillDefinition = {
             source: src,
             kind: "warning",
             confidence: "unknown",
-            detail: result.error ?? "the feed returned no items",
+            detail:
+              [result.error, bingFallback?.error].filter(Boolean).join(" · ") ||
+              "both news engines returned no items",
           }),
         ],
         sources: [src],
@@ -347,7 +366,14 @@ export const googleNewsSkill: SkillDefinition = {
       });
     }
 
-    const newest = result.articles.find((article) => article.publishedAt);
+    const finalArticles =
+      result.articles.length > 0 ? result.articles : (bingFallback?.articles ?? []);
+    const engineNote =
+      result.articles.length > 0
+        ? undefined
+        : `Google's feed was unreachable — these came from Bing News instead (${bingFallback?.via ?? "relay"}).`;
+
+    const newest = finalArticles.find((article) => article.publishedAt);
     const ageMinutes = newest?.publishedAt
       ? Math.round((Date.now() - newest.publishedAt) / 60000)
       : undefined;
@@ -366,12 +392,17 @@ export const googleNewsSkill: SkillDefinition = {
             "Say a city or state for local news (Mumbai, Maharashtra, New York…), or another country — it is remembered.",
         },
       ),
-      evidence(skill, "Items", `${result.articles.length} headline(s), newest first`, {
+      evidence(skill, "Items", `${finalArticles.length} headline(s), newest first`, {
         source: src,
         detail:
-          ageMinutes !== undefined
-            ? `Freshest item is about ${ageMinutes < 90 ? `${Math.max(ageMinutes, 1)} minute(s) old` : `${Math.round(ageMinutes / 60)} hour(s) old`}.`
-            : undefined,
+          [
+            ageMinutes !== undefined
+              ? `Freshest item is about ${ageMinutes < 90 ? `${Math.max(ageMinutes, 1)} minute(s) old` : `${Math.round(ageMinutes / 60)} hour(s) old`}.`
+              : undefined,
+            engineNote,
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined,
       }),
       evidence(
         skill,
@@ -387,10 +418,10 @@ export const googleNewsSkill: SkillDefinition = {
 
     return retrievalTargetOutcome({
       status: "ok",
-      summary: `${result.articles.length} latest headline(s) for ${scopeLabel ?? result.edition.label}${askQuery ? ` on “${askQuery}”` : ""}.`,
+      summary: `${finalArticles.length} latest headline(s) for ${scopeLabel ?? result.edition.label}${askQuery ? ` on “${askQuery}”` : ""}.`,
       evidence: evidenceItems,
       sources: [src],
-      articles: result.articles,
+      articles: finalArticles,
     });
   },
 };
@@ -594,9 +625,24 @@ export const openWebSkill: SkillDefinition = {
     const structuredMode =
       mode === "papers" || mode === "study" || mode === "sites" ? mode : undefined;
     const collected: WebResult[] = [];
-    for (const query of queries) {
-      ctx.log(`Searching: ${query}`);
-      const found = await webSearch(query, { limit, signal: ctx.signal });
+    // The engine queries are independent — run them at the same time. Papers
+    // mode used to pay two full search latencies back to back, which alone
+    // could blow the whole 30-second budget.
+    const foundLists = await Promise.all(
+      queries.map(async (query) => {
+        ctx.log(`Searching: ${query}`);
+        try {
+          return await webSearch(query, { limit, signal: ctx.signal });
+        } catch {
+          return {
+            results: [],
+            engine: "none",
+            error: "the search threw",
+          } as WebSearchOutcome;
+        }
+      }),
+    );
+    for (const found of foundLists) {
       collected.push(...found.results);
       if (found.error) {
         evidenceItems.push(
@@ -606,9 +652,6 @@ export const openWebSkill: SkillDefinition = {
             confidence: "unknown",
           }),
         );
-      }
-      if (collected.length >= limit) {
-        break;
       }
     }
 

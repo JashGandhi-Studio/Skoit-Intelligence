@@ -81,6 +81,18 @@ export function downloadGenerated(
   saveBlob(blob, filename);
 }
 
+/**
+ * A download URL that works even when the source refuses cross-origin reads:
+ * the console's own server streams the file with a save-attachment header.
+ */
+export function proxiedDownloadUrl(url: string, filename?: string): string {
+  const params = new URLSearchParams({ url });
+  if (filename) {
+    params.set("filename", filename);
+  }
+  return `/api/download?${params.toString()}`;
+}
+
 /** Download something that lives at a URL, as directly as the browser allows. */
 export async function forceDownload(
   url: string,
@@ -90,19 +102,39 @@ export async function forceDownload(
   const fallbackExt = options.ext ?? extensionFromMime("") ?? "";
   const filename = fileNameFor(title, url, options.ext ?? "", options.prefix ?? "skoit");
 
-  try {
-    const response = await fetch(url, {
-      mode: "cors",
-      signal: options.signal,
-      cache: "no-store",
-    });
-    if (response.ok) {
-      const blob = await response.blob();
-      saveBlob(blob, filename);
-      return { mode: "blob", filename };
+  // Only attempt browser-direct for http(s); the proxy handles the rest.
+  if (/^https?:\/\//i.test(url)) {
+    try {
+      const response = await fetch(url, {
+        mode: "cors",
+        signal: options.signal,
+        cache: "no-store",
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        saveBlob(blob, filename);
+        return { mode: "blob", filename };
+      }
+    } catch {
+      /* CORS or network — the server route is next */
     }
-  } catch {
-    /* CORS or network — try the relay */
+
+    // The console's own server streams the file with an attachment header.
+    // This succeeds for the many publishers that refuse cross-origin reads,
+    // without routing the bytes through a third-party public proxy.
+    try {
+      const response = await fetch(proxiedDownloadUrl(url, filename), {
+        signal: options.signal,
+        cache: "no-store",
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        saveBlob(blob, filename);
+        return { mode: "relay", filename };
+      }
+    } catch {
+      /* server route refused too — the public relay chain is the last stop */
+    }
   }
 
   const relayed = await relayBytes(url, { signal: options.signal });
