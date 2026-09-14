@@ -505,6 +505,23 @@ export function deterministicBriefing(
           .join("; ")}`,
       );
     }
+    const audio = media.filter((item) => item.kind === "audio");
+    if (audio.length > 0) {
+      const downloadable = audio.filter((item) => item.access !== "preview").length;
+      lines.push(
+        `- **${audio.length} track(s)** — ${downloadable} downloadable file(s), ${
+          audio.length - downloadable
+        } official preview(s): ${audio
+          .slice(0, 4)
+          .map(
+            (item) =>
+              `${item.title} (${item.source}${item.licence ? `, ${item.licence}` : ""}${
+                item.storeName ? `, full track from ${item.storeName}` : ""
+              })`,
+          )
+          .join("; ")}`,
+      );
+    }
     const unlicensed = media.filter((item) => !item.licence).length;
     if (unlicensed > 0) {
       lines.push(

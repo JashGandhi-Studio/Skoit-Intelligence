@@ -165,6 +165,12 @@ files found for printing or PDF.
 Data written under the old `~/.indus` directory and the old browser storage key is migrated on first
 run.
 
+## Third-party notices
+
+`THIRD-PARTY-NOTICES.md` lists every bundled library with the licence its own
+`package.json` declares, plus the public sources the skills query and the terms
+each one carries.
+
 ## Legal and ethical scope
 
 This tool queries public registries, transparency logs and public APIs. It does not bypass
