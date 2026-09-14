@@ -81,8 +81,13 @@ const ACTIVE_KEY = "indus.active-case";
 export function applyEvent(turn: TurnView, event: AgentEvent): TurnView {
   switch (event.type) {
     case "plan": {
+      // Dedupe on the skill *and* its target: the same skill legitimately runs
+      // against several targets in one pass.
+      const existing = new Set(
+        turn.steps.map((step) => `${step.skillId}::${step.target}`),
+      );
       const filtered = event.steps.filter(
-        (step) => !turn.steps.some((existing) => existing.skillId === step.skillId),
+        (step) => !existing.has(`${step.skillId}::${step.target}`),
       );
       return {
         ...turn,
@@ -157,7 +162,12 @@ export function applyEvent(turn: TurnView, event: AgentEvent): TurnView {
     case "risk":
       return { ...turn, risk: event.risk };
     case "synthesis:start":
-      return { ...turn, phase: "synthesizing" };
+      return {
+        ...turn,
+        phase: "synthesizing",
+        answerMode: event.mode,
+        model: event.model ?? turn.model,
+      };
     case "synthesis:delta":
       return { ...turn, answer: event.text, phase: "synthesizing" };
     case "synthesis:done":

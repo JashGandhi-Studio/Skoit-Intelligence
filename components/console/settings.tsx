@@ -56,11 +56,22 @@ const KEY_LABELS: Record<string, string> = {
 export function SettingsDialog({
   children,
   onCapabilities,
+  open: controlledOpen,
+  onOpenChange,
 }: {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   onCapabilities?: (capabilities: CapabilityResponse) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    if (controlledOpen === undefined) {
+      setUncontrolledOpen(next);
+    }
+    onOpenChange?.(next);
+  };
   const [capabilities, setCapabilities] = useState<CapabilityResponse | null>(null);
   const [keys, setKeys] = useState<KeyRow[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -135,7 +146,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      {children ? <DialogTrigger asChild>{children}</DialogTrigger> : null}
       <DialogContent
         title="Console settings"
         description="Keys live in a local config file with owner-only permissions. They are never sent to the browser and never leave this machine."

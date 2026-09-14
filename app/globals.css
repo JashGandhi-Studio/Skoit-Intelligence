@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* typography for the analyst briefing */
+@plugin "@tailwindcss/typography";
+
 @custom-variant dark (&:is(.dark, .dark *));
 
 /* ------------------------------------------------------------------

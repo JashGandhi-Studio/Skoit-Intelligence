@@ -211,6 +211,24 @@ export type AgentEvent =
       stats: { steps: number; evidence: number; entities: number; sources: number };
     };
 
+/** Container-level metadata recovered in the browser from documents (PDF, OOXML). */
+export interface DocumentInfo {
+  format: string;
+  pages?: number;
+  producer?: string;
+  creator?: string;
+  title?: string;
+  author?: string;
+  createdAt?: string;
+  modifiedAt?: string;
+  encrypted?: boolean;
+  signed?: boolean;
+  scripting?: boolean;
+  embeddedFiles?: number;
+  incrementalUpdates?: number;
+  notes?: string[];
+}
+
 /** A file the analyst attached, already parsed in the browser (EXIF, hashes, entropy). */
 export interface AttachmentInput {
   name: string;
@@ -224,6 +242,7 @@ export interface AttachmentInput {
   exifErrors?: string[];
   textPreview?: string;
   coordinates?: { lat: number; lon: number };
+  document?: DocumentInfo;
 }
 
 export interface AttachmentPayload extends AttachmentInput {

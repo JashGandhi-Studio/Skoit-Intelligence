@@ -55,6 +55,45 @@ function parseAttachments(value: unknown): AttachmentPayload[] {
       textPreview: item.textPreview ? String(item.textPreview).slice(0, 4000) : undefined,
       coordinates:
         typeof lat === "number" && typeof lon === "number" ? { lat, lon } : undefined,
+      document: item.document
+        ? {
+            format: String(item.document.format ?? "unknown").slice(0, 80),
+            pages:
+              typeof item.document.pages === "number" ? item.document.pages : undefined,
+            producer: item.document.producer
+              ? String(item.document.producer).slice(0, 200)
+              : undefined,
+            creator: item.document.creator
+              ? String(item.document.creator).slice(0, 200)
+              : undefined,
+            title: item.document.title
+              ? String(item.document.title).slice(0, 200)
+              : undefined,
+            author: item.document.author
+              ? String(item.document.author).slice(0, 200)
+              : undefined,
+            createdAt: item.document.createdAt
+              ? String(item.document.createdAt).slice(0, 40)
+              : undefined,
+            modifiedAt: item.document.modifiedAt
+              ? String(item.document.modifiedAt).slice(0, 40)
+              : undefined,
+            encrypted: Boolean(item.document.encrypted),
+            signed: Boolean(item.document.signed),
+            scripting: Boolean(item.document.scripting),
+            embeddedFiles:
+              typeof item.document.embeddedFiles === "number"
+                ? item.document.embeddedFiles
+                : undefined,
+            incrementalUpdates:
+              typeof item.document.incrementalUpdates === "number"
+                ? item.document.incrementalUpdates
+                : undefined,
+            notes: Array.isArray(item.document.notes)
+              ? item.document.notes.slice(0, 8).map((note) => String(note).slice(0, 400))
+              : undefined,
+          }
+        : undefined,
       summary: String(item.summary ?? "").slice(0, 2000),
       evidence: Array.isArray(item.evidence)
         ? (item.evidence as Evidence[]).slice(0, 60)

@@ -87,7 +87,13 @@ export async function runClientPass(
     if (!skill) {
       continue;
     }
-    const localStep: PlannedStep = { ...step, id: stepIds?.[step.skillId] ?? step.id };
+    const localStep: PlannedStep = {
+      ...step,
+      id:
+        stepIds?.[`${step.skillId}::${step.target}`] ??
+        stepIds?.[step.skillId] ??
+        step.id,
+    };
     localStep.status = "running";
     const stepStart = Date.now();
     onEvent({

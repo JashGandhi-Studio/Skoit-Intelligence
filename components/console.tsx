@@ -27,13 +27,64 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/field";
-import { Tip } from "@/components/ui/misc";
-import { applyEvent, type TurnView, toCaseTurn, useCases } from "@/lib/client/cases";
+import { Skeleton, Tip } from "@/components/ui/misc";
+import {
+  type AnalysisBundle,
+  assessRisk,
+  deterministicBriefing,
+} from "@/lib/agent/synthesize";
+import {
+  applyEvent,
+  bundleFromTurn,
+  type TurnView,
+  toCaseTurn,
+  useCases,
+} from "@/lib/client/cases";
 import { runClientPass } from "@/lib/client/runner";
 import { getSkill, manifest } from "@/lib/skills";
 import { detectTargets } from "@/lib/skills/identify";
-import type { AgentEvent, AgentRequest, CaseFile, CaseTurn } from "@/lib/types";
+import type {
+  AgentEvent,
+  AgentRequest,
+  CaseFile,
+  CaseTurn,
+  RiskAssessment,
+} from "@/lib/types";
 import { cn, formatDuration } from "@/lib/utils";
+
+/**
+ * Never lets a merged pass silently contradict the write-up: the model briefing
+ * is kept and gains a labelled addendum, while an analyst briefing is rebuilt
+ * over the merged bundle.
+ */
+function mergedAnswer(
+  turn: TurnView,
+  bundle: AnalysisBundle,
+  risk: RiskAssessment,
+  evidenceBeforePass: number,
+): string {
+  if (turn.answerMode !== "model" || !turn.answer) {
+    return deterministicBriefing(bundle, risk);
+  }
+  const added = turn.evidence.slice(evidenceBeforePass);
+  if (added.length === 0) {
+    return turn.answer;
+  }
+  return [
+    turn.answer,
+    "",
+    "---",
+    "",
+    "### Browser-side addendum",
+    "",
+    `Collected after the server pass, from this browser. Risk is re-scored over the merged set: **${risk.band}** (${risk.score}/100).`,
+    "",
+    ...added.map(
+      (item) =>
+        `- **${item.label}** — ${item.value}${item.detail ? `\n  - ${item.detail}` : ""}`,
+    ),
+  ].join("\n");
+}
 
 const STARTERS = [
   {
@@ -131,6 +182,7 @@ export function Console() {
   const [mobileNav, setMobileNav] = useState(false);
   const [mobileIntel, setMobileIntel] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -349,6 +401,8 @@ export function Console() {
               .filter((skill) => getSkill(skill.id)?.clientFallback)
               .map((skill) => skill.id));
 
+      let browserRan = false;
+
       if (fallbackSkillIds.length > 0 && !controller.signal.aborted) {
         const stepIds: Record<string, string> = {};
         for (const step of snapshot?.steps ?? []) {
@@ -363,29 +417,80 @@ export function Console() {
 
         await runClientPass(request, {
           onEvent: (event) => {
-            if (event.type === "plan") {
+            // The client pass cannot plan, score or write up: those belong to the
+            // server pass, and the merged result is reconciled below.
+            if (
+              event.type === "plan" ||
+              event.type === "risk" ||
+              event.type === "turn:done"
+            ) {
               return;
             }
-            if (event.type === "step:start" || event.type === "step:done") {
-              const mapped = stepIds[event.skillId] ?? event.stepId;
-              patchTurn(turn.id, { ...event, stepId: mapped } as AgentEvent);
-              return;
-            }
-            if (event.type === "risk" || event.type === "turn:done") {
-              return;
-            }
+            // The runner resolved the step id through the plan mapping already.
             patchTurn(turn.id, event);
           },
           signal: controller.signal,
           onlySkillIds: fallbackSkillIds,
           stepIds,
         }).catch(() => undefined);
+        browserRan = true;
 
         setTurns((current) =>
           current.map((item) =>
             item.id === turn.id ? { ...item, clientPassRan: true } : item,
           ),
         );
+      }
+
+      // Single reconciliation point for the two passes: the risk read and the
+      // write-up must describe everything that was collected — and nothing more.
+      // A run that collected nothing says so instead of trailing off.
+      const settled = await new Promise<TurnView | null>((resolve) => {
+        setTurns((current) => {
+          resolve(current.find((item) => item.id === turn.id) ?? null);
+          return current;
+        });
+      });
+
+      if (settled) {
+        const evidenceBeforePass = snapshot?.evidence.length ?? 0;
+        const gained = settled.evidence.length - evidenceBeforePass;
+
+        if (gained > 0 || browserRan || !settled.answer) {
+          const bundle = bundleFromTurn(settled);
+          const mergedRisk = assessRisk(bundle);
+
+          if (gained > 0) {
+            patchTurn(turn.id, {
+              type: "notice",
+              level: "info",
+              message: `Browser pass added ${gained} finding(s) — risk re-scored over ${settled.evidence.length} merged observation(s).`,
+            });
+          }
+
+          setTurns((current) =>
+            current.map((item) =>
+              item.id === turn.id
+                ? {
+                    ...item,
+                    phase: "done",
+                    finishedAt: item.finishedAt ?? Date.now(),
+                    risk: mergedRisk,
+                    answer: mergedAnswer(settled, bundle, mergedRisk, evidenceBeforePass),
+                    answerMode: settled.answer
+                      ? (item.answerMode ?? "analyst")
+                      : "analyst",
+                    stats: {
+                      steps: settled.steps.length,
+                      evidence: settled.evidence.length,
+                      entities: settled.entities.length,
+                      sources: settled.sources.length,
+                    },
+                  }
+                : item,
+            ),
+          );
+        }
       }
 
       setBusy(false);
@@ -418,8 +523,39 @@ export function Console() {
 
   if (!hydrated) {
     return (
-      <div className="grid h-dvh place-items-center bg-background text-[13px] text-faint-foreground">
-        Loading console…
+      <div className="flex h-dvh w-full overflow-hidden bg-background">
+        <div className="hidden w-[304px] shrink-0 flex-col gap-3 border-r border-hairline bg-surface p-3.5 lg:flex">
+          <div className="flex items-center gap-2.5">
+            <Skeleton className="size-7 rounded-full" />
+            <Skeleton className="h-3.5 w-24" />
+          </div>
+          <Skeleton className="h-9.5 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <div className="mt-2 space-y-2">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-7 w-24" />
+          </div>
+          <div className="mx-auto w-full max-w-[760px] flex-1 space-y-3 px-4 py-5">
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-3/4" />
+          </div>
+          <div className="mx-auto w-full max-w-[760px] px-4 pb-4">
+            <Skeleton className="h-24 w-full" />
+          </div>
+        </div>
+        <div className="hidden w-[368px] shrink-0 space-y-3 border-l border-hairline p-3 lg:block">
+          <Skeleton className="h-28 w-full" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-40 w-full" />
+        </div>
       </div>
     );
   }
@@ -440,7 +576,7 @@ export function Console() {
             updateCase(caseFile.id, (item) => ({ ...item, pinned: !item.pinned }))
           }
           onImport={importCase}
-          onOpenSettings={() => undefined}
+          onOpenSettings={() => setSettingsOpen(true)}
           egress={egress}
           skillCount={skills.length}
         />
@@ -481,7 +617,11 @@ export function Console() {
                       }))
                     }
                     onImport={importCase}
-                    onOpenSettings={() => setMobileNav(false)}
+                    onOpenSettings={() => {
+                      setMobileNav(false);
+                      // Let the nav sheet finish closing before the dialog opens.
+                      window.setTimeout(() => setSettingsOpen(true), 120);
+                    }}
                     egress={egress}
                     skillCount={skills.length}
                   />
@@ -568,7 +708,11 @@ export function Console() {
               </Tip>
             )}
 
-            <SettingsDialog>
+            <SettingsDialog
+              open={settingsOpen}
+              onOpenChange={setSettingsOpen}
+              onCapabilities={(capabilities) => setEgress(capabilities.egress)}
+            >
               <Button variant="ghost" size="icon" aria-label="Settings">
                 <Wrench />
               </Button>

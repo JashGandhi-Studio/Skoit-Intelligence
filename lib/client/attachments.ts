@@ -1,6 +1,7 @@
 "use client";
 
 import exifr from "exifr";
+import { analyseDocument } from "@/lib/client/documents";
 import { md5, sha1, sha256, shannonEntropy } from "@/lib/crypto/digest";
 import type { AttachmentPayload, Evidence } from "@/lib/types";
 import { newId } from "@/lib/utils";
@@ -165,6 +166,42 @@ export async function analyseAttachment(
       ];
     }
     return payload;
+  }
+
+  const document = analyseDocument(bytes);
+  if (document) {
+    payload.document = document;
+    payload.summary = [
+      document.format,
+      document.pages ? `${document.pages} page(s)` : undefined,
+      document.producer ? `produced by ${document.producer}` : undefined,
+      document.author ? `author ${document.author}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    evidence.push({
+      id: newId("ev"),
+      skillId,
+      kind: "artifact",
+      label: "Document metadata",
+      value: payload.summary,
+      confidence: "confirmed",
+      observedAt: Date.now(),
+      detail: document.notes?.join(" "),
+    });
+  } else if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+    evidence.push({
+      id: newId("ev"),
+      skillId: "attachment-review",
+      kind: "warning",
+      label: "PDF header missing",
+      value: "the file is named/typed as PDF but does not begin with %PDF-",
+      confidence: "confirmed",
+      observedAt: Date.now(),
+      severity: "medium",
+    });
+    payload.document = { format: "not a valid PDF", notes: [] };
+    payload.summary = "Claimed to be a PDF but the %PDF- header is absent.";
   }
 
   if (

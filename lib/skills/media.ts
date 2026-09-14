@@ -260,7 +260,9 @@ export const attachmentReview: SkillDefinition = {
         );
       }
 
-      if (!file.hasExif) {
+      const document = file.document;
+
+      if (!file.hasExif && !document) {
         evidenceItems.push(
           makeEvidence(skill, "Metadata state", "EXIF stripped or never present", {
             source: localSrc,
@@ -363,13 +365,101 @@ export const attachmentReview: SkillDefinition = {
             "confirmed",
           ),
         );
-      } else {
+      } else if (!document) {
         evidenceItems.push(
           makeEvidence(skill, "GPS position", "not present in metadata", {
             source: localSrc,
             confidence: "probable",
           }),
         );
+      }
+
+      if (document) {
+        evidenceItems.push(
+          makeEvidence(skill, "Container", document.format, {
+            source: localSrc,
+            detail: document.pages ? `${document.pages} page(s) counted.` : undefined,
+            kind: "artifact",
+          }),
+        );
+        const authorship = [document.author, document.title].filter(Boolean).join(" — ");
+        if (authorship) {
+          evidenceItems.push(
+            makeEvidence(skill, "Document authorship", authorship, {
+              source: localSrc,
+              severity: "medium",
+              detail:
+                "Author and title are stored in the file itself and travel with every copy of it.",
+            }),
+          );
+          if (document.author) {
+            entities.push(
+              entity(
+                skill,
+                "text",
+                document.author,
+                "Document author",
+                attrs({ title: document.title, format: document.format }),
+                "probable",
+              ),
+            );
+          }
+        }
+        const toolchain = [document.creator, document.producer]
+          .filter(Boolean)
+          .join(" → ");
+        if (toolchain) {
+          evidenceItems.push(
+            makeEvidence(skill, "Authoring toolchain", toolchain, { source: localSrc }),
+          );
+        }
+        if (document.createdAt || document.modifiedAt) {
+          evidenceItems.push(
+            makeEvidence(
+              skill,
+              "Document timestamps",
+              [document.createdAt, document.modifiedAt].filter(Boolean).join(" → "),
+              {
+                source: localSrc,
+                severity:
+                  document.createdAt &&
+                  document.modifiedAt &&
+                  document.createdAt !== document.modifiedAt
+                    ? "low"
+                    : "info",
+              },
+            ),
+          );
+        }
+        const flags = [
+          document.encrypted ? "encrypted" : undefined,
+          document.signed ? "digitally signed" : undefined,
+          document.scripting ? "contains JavaScript" : undefined,
+          document.embeddedFiles
+            ? `${document.embeddedFiles} embedded file(s)`
+            : undefined,
+          document.incrementalUpdates
+            ? `${document.incrementalUpdates} incremental update(s)`
+            : undefined,
+        ].filter(Boolean);
+        if (flags.length > 0) {
+          evidenceItems.push(
+            makeEvidence(skill, "Structural flags", flags.join(" · "), {
+              source: localSrc,
+              severity: document.scripting ? "high" : "medium",
+              detail:
+                "Active content and embedded payloads are the two properties most often abused in document-borne attacks.",
+            }),
+          );
+        }
+        for (const note of document.notes ?? []) {
+          evidenceItems.push(
+            makeEvidence(skill, "Document note", note, {
+              source: localSrc,
+              kind: "record",
+            }),
+          );
+        }
       }
 
       if (file.exifErrors?.length) {
@@ -386,9 +476,10 @@ export const attachmentReview: SkillDefinition = {
     return {
       status: "ok",
       summary: `${attachments.length} file(s) reviewed: ${attachments
-        .map(
-          (file) =>
-            `${file.name}${file.hasExif ? " (metadata present)" : " (metadata stripped)"}`,
+        .map((file) =>
+          file.document
+            ? `${file.name} (${file.document.format})`
+            : `${file.name}${file.hasExif ? " (metadata present)" : " (metadata stripped)"}`,
         )
         .join(", ")}.`,
       evidence: evidenceItems,
@@ -402,7 +493,12 @@ function describeFile(file: AttachmentInput): string {
   const size = file.sizeBytes
     ? `${(file.sizeBytes / 1024).toFixed(1)} KiB`
     : "size unknown";
-  return `${file.type || "unknown type"} · ${size}${file.hasExif ? " · EXIF present" : " · no EXIF"}`;
+  const metadata = file.document
+    ? file.document.format
+    : file.hasExif
+      ? "EXIF present"
+      : "no EXIF";
+  return `${file.type || "unknown type"} · ${size} · ${metadata}`;
 }
 
 function asString(value: unknown): string | undefined {
