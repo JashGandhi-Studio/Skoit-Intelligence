@@ -114,6 +114,10 @@ export interface MediaItem {
    * `access: "preview"` this is a licensed short clip, not the full work.
    */
   url: string;
+  /** Embeddable player URL (YouTube nocookie embeds play inside the console). */
+  embedUrl?: string;
+  /** True when the item precisely matched what was asked for by name. */
+  exact?: boolean;
   /** Landing page that documents the asset, its author and its licence. */
   pageUrl?: string;
   thumbnailUrl?: string;
@@ -181,6 +185,10 @@ export interface AnswerPreferences {
   perSource: number;
   language?: string;
   region?: string;
+  /** Remembered news country — the console asks once, then keeps using it. */
+  country?: string;
+  /** The analyst's name, so greetings and briefings can address them. */
+  userName?: string;
   /**
    * Where written briefings come from: your own keys when they exist, otherwise
    * a free in-browser model — off keeps everything deterministic.

@@ -199,8 +199,10 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
+  /* Never clip against a device notch or the browser chrome: a real minimum
+     padding on top of whatever the environment reports. */
   .safe-t {
-    padding-top: env(safe-area-inset-top, 0px);
+    padding-top: max(env(safe-area-inset-top, 0px), 6px);
   }
 
   .no-scrollbar {

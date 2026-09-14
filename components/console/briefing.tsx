@@ -1,6 +1,6 @@
 "use client";
 
-import { BrainCircuit, Copy, FileDown, Printer, ShieldCheck } from "lucide-react";
+import { BrainCircuit, Copy, FileDown, Globe2, Printer, ShieldCheck } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -8,17 +8,46 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/misc";
 import type { TurnView } from "@/lib/client/cases";
+import { buildStyledPdf, markdownishToInput } from "@/lib/client/pdf-make";
+import { NEWS_EDITIONS, QUICK_COUNTRY_CODES } from "@/lib/news-editions";
 import { copyText, download } from "@/lib/utils";
 
-export function Briefing({ turn, caseTitle }: { turn: TurnView; caseTitle: string }) {
+export function Briefing({
+  turn,
+  caseTitle,
+  onQuickPrompt,
+}: {
+  turn: TurnView;
+  caseTitle: string;
+  onQuickPrompt?: (prompt: string) => void;
+}) {
   if (!turn.answer) {
     return null;
   }
 
-  const markdown = turn.answer.replace(
-    /\[(\d{1,2})\]/g,
-    (_match, index) => `[${index}](#source-${index})`,
-  );
+  const asksCountry = turn.answer.includes("{{ASK_COUNTRY}}");
+  const markdown = turn.answer
+    .replace("{{ASK_COUNTRY}}", "")
+    .trim()
+    .replace(/\[(\d{1,2})\]/g, (_match, index) => `[${index}](#source-${index})`);
+
+  const saveAsPdf = async () => {
+    const sections = markdownishToInput(
+      turn.answer ?? "",
+      turn.question.slice(0, 120) || "SkOiT briefing",
+      caseTitle,
+    );
+    const built = await buildStyledPdf({
+      ...sections,
+      meta: `SkOiT analyst briefing · case: ${caseTitle} · ${new Date().toLocaleDateString()}`,
+      links: turn.sources
+        .filter((entry) => entry.url)
+        .map((entry) => ({ label: entry.label, url: entry.url as string })),
+    });
+    const { downloadGenerated } = await import("@/lib/client/download");
+    downloadGenerated(built.filename, built.blob);
+    toast.success(`Briefing saved as ${built.filename}`);
+  };
 
   return (
     <article className="animate-rise rounded-xl border border-hairline bg-surface">
@@ -33,6 +62,11 @@ export function Briefing({ turn, caseTitle }: { turn: TurnView; caseTitle: strin
           </Badge>
         </div>
         <div className="no-print flex items-center gap-1">
+          <Tip label="Save this briefing as a formatted PDF">
+            <Button variant="ghost" size="iconSm" onClick={() => void saveAsPdf()}>
+              <FileDown className="text-primary-strong" />
+            </Button>
+          </Tip>
           <Tip label="Copy the briefing as markdown">
             <Button
               variant="ghost"
@@ -125,6 +159,36 @@ export function Briefing({ turn, caseTitle }: { turn: TurnView; caseTitle: strin
           {markdown}
         </Markdown>
       </div>
+
+      {asksCountry && onQuickPrompt ? (
+        <div className="border-t border-hairline px-4 py-3">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-faint-foreground uppercase">
+            <Globe2 className="size-3.5 text-primary" />
+            Tap your country
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_COUNTRY_CODES.map((code) => {
+              const edition = NEWS_EDITIONS.find((entry) => entry.code === code);
+              if (!edition) {
+                return null;
+              }
+              return (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() =>
+                    onQuickPrompt(`Show the latest news from ${edition.label}`)
+                  }
+                  className="flex items-center gap-1.5 rounded-full border border-hairline px-3 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:border-primary/50 hover:bg-primary-soft"
+                >
+                  <span aria-hidden>{edition.flag}</span>
+                  {edition.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {turn.sources.length > 0 ? (
         <footer className="border-t border-hairline px-4 py-3">

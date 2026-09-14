@@ -145,26 +145,63 @@ export function isRetrievalAsk(bundle: AnalysisBundle): boolean {
  * The answer for a greeting. Nothing was collected, so it says what it can do
  * instead of running a pointless sweep and dressing it up as analysis.
  */
+function timeOfDayGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) {
+    return "Working late";
+  }
+  if (hour < 12) {
+    return "Good morning";
+  }
+  if (hour < 17) {
+    return "Good afternoon";
+  }
+  return "Good evening";
+}
+
 export function capabilityAnswer(
   mood: "greet" | "thanks" | "capability" = "greet",
+  options: { name?: string } = {},
 ): string {
+  const name = options.name?.trim();
+  const addressed = name ? `, ${name}` : "";
   const opener =
     mood === "thanks"
-      ? "**Any time — say what you need next.**"
+      ? `**Any time${addressed} — say what you need next.**`
       : mood === "capability"
-        ? "**I am SkOiT — a research console, not a chatbot.** Everything I tell you comes from a public source I can name, and I say plainly when a source could not be reached."
-        : "**Hello — tell me what to look for and I will go and get it.**";
+        ? `**I am SkOiT — your research console${addressed}.** Everything I tell you comes from a public source I can name, and I say plainly when a source could not be reached.`
+        : `**${timeOfDayGreeting()}${addressed}! Tell me what to look for and I will go and get it.**`;
   return [
     opener,
     "",
-    "- **Pictures** — “find me a photo of Charminar at sunrise”",
-    "- **Songs & audio** — “play me the song Kesariya”: downloadable tracks from the free libraries, or a 30-second licensed preview with the store link",
-    "- **Footage & B-roll** — “B-roll of Mumbai local trains”",
-    "- **News & articles** — “latest news on the Chennai floods” — gathered from public indexes and cross-checked across domains",
-    "- **Questions** — “who is the chief minister of Maharashtra”, “what is a UPI mandate”: answered from the encyclopaedia entry, with the article cited as crowd-edited reference material",
+    "- **Songs** — “play Ae Dil Hai Mushkil” — the full song from JioSaavn, played and downloadable in-app",
+    "- **Videos** — “videos of Chandrayaan launch” — YouTube, playable right here",
+    "- **News** — “latest news” or “Japan news headlines” — the freshest reporting for your country, readable inside the console",
+    "- **Images** — “find photos of Charminar at sunrise” — licence-carrying sources, direct downloads",
+    "- **Exam papers** — “ICSE class 10 physics specimen paper” — direct PDFs, open and download in-app",
+    "- **Study help** — “study material for class 10 electricity chapter”",
+    "- **Find websites** — “good free websites for AI image prompts”",
+    "- **Compare prices** — paste an Amazon/Flipkart link + “cheapest price”",
+    "- **Summarise a link** — “summarise this article: <link>”",
+    "- **Questions** — “who is the chief minister of Maharashtra” — answered from the encyclopaedia, source cited",
     "- **Investigation** — paste a domain, IP, email, phone number, plate, PIN code or file hash",
     "",
-    "_Nothing is searched until you ask. How much I collect — focused, standard or deep — and how the answer is written are both set in Settings → Answers._",
+    "_The **Document Workshop** (text → proper PDF, merge, split, watermark…) and the **QR Studio** (styled QR codes) are in the left panel. How much I collect — focused, standard or deep — is set in Settings._",
+  ].join("\n");
+}
+
+/**
+ * The news-country question. The console never assumes a country: it asks
+ * once, remembers the answer, and every later news run is scoped to it. The
+ * marker at the end renders quick-pick country chips in the briefing.
+ */
+export function countryAskAnswer(): string {
+  return [
+    "**Happy to get you the latest news — which country should I follow?**",
+    "",
+    "Pick one below or just type it (for example, “Japan” or “news from UAE”). I will remember your country and show its latest headlines from then on — you can change it any time by saying “news from <country>”.",
+    "",
+    "{{ASK_COUNTRY}}",
   ].join("\n");
 }
 

@@ -17,7 +17,11 @@ SkOiT bundles the libraries below. Licences are quoted from each package's own
 | `@tailwindcss/typography` | 0.5.20 | MIT |
 | `class-variance-authority` | 0.7.1 | Apache-2.0 |
 | `clsx` | 2.1.1 | MIT |
+| `crypto-js` | 4.2.0 | MIT |
 | `exifr` | 7.1.3 | MIT |
+| `jspdf` | 4.2.1 | MIT |
+| `pdf-lib` | 1.17.1 | MIT |
+| `qrcode` | 1.5.4 | MIT |
 | `libphonenumber-js` | 1.13.13 | MIT |
 | `lucide-react` | 0.446.0 | ISC |
 | `next` | 16.0.10 | MIT |

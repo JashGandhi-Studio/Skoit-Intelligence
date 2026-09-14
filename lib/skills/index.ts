@@ -6,6 +6,7 @@ import { ipSkills } from "./ip";
 import { knowledgeSkills } from "./knowledge";
 import { mediaSkills } from "./media";
 import { retrievalSkills } from "./retrieval";
+import { webSkills } from "./web";
 
 export const allSkills: SkillDefinition[] = [
   ...domainSkills,
@@ -15,6 +16,7 @@ export const allSkills: SkillDefinition[] = [
   ...mediaSkills,
   ...retrievalSkills,
   ...knowledgeSkills,
+  ...webSkills,
 ];
 
 export const skillById = new Map(allSkills.map((skill) => [skill.id, skill]));

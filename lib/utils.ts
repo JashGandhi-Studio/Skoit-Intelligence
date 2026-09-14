@@ -118,3 +118,17 @@ export function slugify(value: string, fallback = "case"): string {
     .slice(0, 48);
   return slug || fallback;
 }
+
+/** Human-readable file size: 512 → "512 B", 2_400_000 → "2.3 MB". */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(0)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

@@ -1,0 +1,6 @@
+# pnpm treats this file as the workspace marker; SkOiT is a single package.
+allowBuilds:
+  # postinstall scripts needed for native bindings in the sandboxed build.
+  sharp: true
+  core-js: true
+  esbuild: true

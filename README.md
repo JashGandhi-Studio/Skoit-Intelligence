@@ -4,7 +4,7 @@ A working open-source-intelligence workbench that runs on your own machine. It c
 public sources, shows exactly what it could **not** verify, scores the gaps as well as the findings,
 and saves every run as a case file you own.
 
-No accounts. No cloud database. No telemetry. 35 skills — 24 live against public endpoints, 11 offline
+No accounts. No cloud database. No telemetry. 40 skills — 29 live against public endpoints, 11 offline
 validators — and one rule enforced throughout: **nothing is asserted that was not collected.**
 
 ```
@@ -56,6 +56,15 @@ refusal to infer caste, religion or community)
 `pincode-intelligence` (PIN circles and states, live delivery-office data when reachable) ·
 `encyclopedia` (keyless Wikipedia lookup in the language of the question, licence and attribution stated) ·
 `audio-search` (Internet Archive, Wikimedia Commons and Openverse for downloadable audio; Jamendo in full with a free client id; official 30-second catalogue previews with store links for released music) ·
+
+**Everyday retrieval** — `music-saavn` (the JioSaavn catalogue: full-length songs, precision-ranked to the song you
+named, played and downloadable in-app; catalogue streams for personal listening, labelled as such) · `video-youtube`
+(YouTube search played through the official nocookie embed inside the console; downloads are deliberately not offered)
+· `news-google` (Google News per-country editions, newest first, publisher links resolved for in-app reading; the
+country is asked once, remembered, and can be switched by saying "news from …") · `open-web` (keyless DuckDuckGo/Bing
+search with four structured modes: exam papers with direct PDFs, study material, website discovery including fresh
+Vercel/Netlify projects, and product offer hunting across stores from a pasted Amazon/Flipkart link) ·
+`article-reader` (pulls any article out of its page, extracts key points, and feeds the in-app reader) ·
 `vehicle-registration` (state, RTO zone, series decode — plus a plain statement that owner data is not
 publicly obtainable)
 

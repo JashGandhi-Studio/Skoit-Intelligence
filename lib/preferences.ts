@@ -45,6 +45,14 @@ export function sanitizePreferences(input: unknown): AnswerPreferences {
       typeof raw.region === "string" && /^[A-Za-z]{2}$/.test(raw.region)
         ? raw.region.toUpperCase()
         : undefined,
+    country:
+      typeof raw.country === "string" && /^[a-z-]{2,8}$/i.test(raw.country)
+        ? raw.country.toLowerCase()
+        : undefined,
+    userName:
+      typeof raw.userName === "string" && raw.userName.trim().length > 0
+        ? raw.userName.trim().slice(0, 40)
+        : undefined,
   };
 }
 

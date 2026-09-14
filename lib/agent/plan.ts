@@ -1,3 +1,4 @@
+import { detectCountryStatement } from "@/lib/news-editions";
 import { getSkill, skillsMatchingText } from "@/lib/skills";
 import {
   detectTargets,
@@ -26,6 +27,8 @@ export interface AnswerIntent {
   explicit: boolean;
   /** True when the analyst explicitly asked for a video (used for stock footage). */
   wantsVideo: boolean;
+  /** A structured web task the open-web skill should perform. */
+  webTask?: "papers" | "study" | "sites" | "offers" | "summarize";
 }
 
 const RETRIEVAL_PATTERNS: Array<{ kind: RetrievalKind; pattern: RegExp }> = [
@@ -69,6 +72,38 @@ const REQUEST_NOISE =
  */
 const DEVANAGARI_NOISE =
   /(?<![\u0900-\u097F])(?:के बारे में|बारे में|दिखाओ|दिखाइए|दिखा दो|चाहिए|चाहिये|कीजिए|मुझे|तस्वीरें|तस्वीर|फ़ोटो|फोटो|चित्रों|चित्र|वीडियो|वीडिओ|बी-रोल|बीरोल|फुटेज|क्लिप|खबरें|खबर|समाचार|ताज़ा|लेख|रिपोर्ट|गाना|गाने|संगीत|धुन|सुनाओ|सुनो|ऑडियो|बजाओ|अच्छा|अच्छी|कोई|कुछ|की|का|के|पर|में|और|है|हैं)(?![\u0900-\u097F])/g;
+
+/**
+ * Structured web asks: these route to the open-web skill in a specific mode —
+ * exam papers (PDF-first), study material, website discovery, price hunting —
+ * rather than the generic retrieval chain.
+ */
+const PAPERS_PATTERN =
+  /\b(?:specimen|sample|model|question|previous(?:\s+year)?|board|practice|guess)\s+papers?\b|\bpyqs?\b|\bpaper of\b/i;
+const STUDY_PATTERN =
+  /\bstudy material\b|\b(?:chapter|exam|class|subject)\s+notes\b|\bnotes\s+(?:for|of|on)\b|\brevision notes\b|\bworksheets?\b|\bsyllabus\b/i;
+const SITES_PATTERN =
+  /\b(?:websites?|web ?sites?|web ?apps?|sites?|portals?)\b|\bfind\s+(?:me\s+)?(?:good|best|free|new|top)?\s*(?:websites?|sites?)/i;
+const OFFERS_PATTERN =
+  /\b(?:price|prices|cheaper|cheapest|lowest(?:\s+price)?|compare|comparison|deals?|offers?|discount|buy)\b/i;
+export const SUMMARIZE_PATTERN =
+  /\b(?:summarise|summarize|summing up|tl;?dr|key points of)\b|\bread\s+(?:this|the)?\s*(?:article|link|page|url)\b/i;
+
+export function detectWebTask(message: string): AnswerIntent["webTask"] | undefined {
+  if (PAPERS_PATTERN.test(message)) {
+    return "papers";
+  }
+  if (OFFERS_PATTERN.test(message)) {
+    return "offers";
+  }
+  if (STUDY_PATTERN.test(message)) {
+    return "study";
+  }
+  if (SITES_PATTERN.test(message)) {
+    return "sites";
+  }
+  return undefined;
+}
 
 export function cleanTopic(message: string): string {
   let stripped = message;
@@ -135,7 +170,7 @@ export function detectIntent(
     kinds.push("image");
   }
 
-  return { kinds, topic, explicit, wantsVideo };
+  return { kinds, topic, explicit, wantsVideo, webTask: detectWebTask(message) };
 }
 
 const TYPO_KEYWORDS =
@@ -148,17 +183,24 @@ const FULL_SWEEP =
 const RETRIEVAL_SKILL_IDS = new Set([
   "image-search",
   "video-search",
+  "video-youtube",
   "audio-search",
+  "music-saavn",
   "news-search",
+  "news-google",
+  "open-web",
+  "article-reader",
   "image-provenance",
 ]);
 
-const RETRIEVAL_SKILL_FOR: Record<RetrievalKind, string> = {
-  image: "image-search",
-  video: "video-search",
-  audio: "audio-search",
-  news: "news-search",
-  article: "news-search",
+/** A retrieval ask can legitimately run more than one skill — a video ask
+ * plays from YouTube *and* still searches licence-clear footage libraries. */
+const RETRIEVAL_SKILLS_FOR: Record<RetrievalKind, string[]> = {
+  image: ["image-search"],
+  video: ["video-youtube", "video-search"],
+  audio: ["music-saavn", "audio-search"],
+  news: ["news-google"],
+  article: ["open-web", "news-google"],
 };
 
 export type SmallTalkMood = "greet" | "thanks" | "capability";
@@ -399,6 +441,8 @@ export interface Plan {
   intent: AnswerIntent;
   /** Set when the message was conversation rather than a request. */
   smallTalk?: SmallTalkMood;
+  /** Set when a news ask needs the country question answered first. */
+  countryAsk?: boolean;
 }
 
 export function buildPlan(request: AgentRequest): Plan {
@@ -457,12 +501,29 @@ export function buildPlan(request: AgentRequest): Plan {
     },
   });
 
-  const addRetrieval = (kind: RetrievalKind, topic = intent.topic) => {
-    const skill = getSkill(RETRIEVAL_SKILL_FOR[kind]);
-    if (skill) {
-      addStep(skill, retrievalTarget(topic));
+  const addRetrieval = (
+    kind: RetrievalKind,
+    topic = intent.topic,
+    extra: Record<string, string> = {},
+  ) => {
+    for (const skillId of RETRIEVAL_SKILLS_FOR[kind]) {
+      const skill = getSkill(skillId);
+      if (skill) {
+        addStep(skill, retrievalTarget(topic, extra));
+      }
     }
   };
+
+  // News is remembered per country: the console asks once, stores the answer,
+  // and every later news ask uses it. "News from Japan" states a country and
+  // updates the stored one at the same time.
+  const countryMention = detectCountryStatement(message);
+  const storedCountry =
+    preferences.country ?? preferences.region?.toLowerCase() ?? undefined;
+  // Only *news* asks gate on the country question — articles and summaries are
+  // web reading, not a front page, and must never be blocked by a dialog.
+  const newsWanted = intent.kinds.includes("news") && intent.webTask === undefined;
+  const newsCountry = countryMention?.code ?? storedCountry;
 
   const talk =
     targets.length === 0 && intent.kinds.length === 0
@@ -485,11 +546,75 @@ export function buildPlan(request: AgentRequest): Plan {
     };
   }
 
+  if (newsWanted && !newsCountry && intent.webTask === undefined) {
+    return {
+      targets,
+      steps: [],
+      countryAsk: true,
+      rationale:
+        "A news ask needs a country, and none is stored yet — the console asks rather than assuming. Once answered it is remembered for every later news run.",
+      mode: "focused",
+      intent,
+    };
+  }
+
   const retrievalOnly = intent.kinds.length > 0 && hardTargets.length === 0;
 
   const provenanceAsk = PROVENANCE_KEYWORDS.test(message);
 
   if (retrievalOnly) {
+    // A price ask with no link: hunt the product across stores by name.
+    if (intent.webTask === "offers") {
+      const openWeb = getSkill("open-web");
+      if (openWeb) {
+        addStep(openWeb, retrievalTarget(intent.topic || message, { webTask: "offers" }));
+      }
+      return {
+        targets,
+        steps,
+        rationale:
+          "A price question — the open web is searched for this product on the stores that carry it, so the prices can be compared side by side.",
+        mode: "focused",
+        intent,
+      };
+    }
+
+    // Structured web tasks replace the generic chain: the ask is a *search
+    // job* with a known shape, so the open-web skill runs in that mode.
+    const structuredTask =
+      intent.webTask === "papers" ||
+      intent.webTask === "study" ||
+      intent.webTask === "sites"
+        ? intent.webTask
+        : undefined;
+    if (structuredTask) {
+      const openWeb = getSkill("open-web");
+      if (openWeb) {
+        addStep(
+          openWeb,
+          retrievalTarget(intent.topic || message, { webTask: structuredTask }),
+        );
+      }
+      if (structuredTask === "papers" || structuredTask === "study") {
+        const wiki = getSkill("encyclopedia");
+        if (wiki && focus !== "focused") {
+          addStep(wiki, retrievalTarget(intent.topic || message));
+        }
+      }
+      const mode: Plan["mode"] = wantsDeep
+        ? "deep"
+        : focus === "standard"
+          ? "standard"
+          : "focused";
+      return {
+        targets,
+        steps,
+        rationale: `A ${structuredTask === "papers" ? "exam-paper" : structuredTask === "study" ? "study-material" : "website-discovery"} search on “${intent.topic || message}” — the open web is searched directly${structuredTask === "papers" ? ", direct PDF links first" : ""}, and every result opens or downloads in-app.`,
+        mode,
+        intent,
+      };
+    }
+
     // The analyst asked for a thing to be found, not for a dossier. Answer that.
     for (const kind of intent.kinds) {
       // "Is this photo original?" is a question about the attached image, not a
@@ -497,7 +622,20 @@ export function buildPlan(request: AgentRequest): Plan {
       if (kind === "image" && attachments.length > 0 && provenanceAsk) {
         continue;
       }
-      addRetrieval(kind);
+      addRetrieval(
+        kind,
+        intent.topic,
+        kind === "news" || kind === "article" ? { country: newsCountry ?? "" } : {},
+      );
+    }
+
+    // A link was handed over with a summarise ask: read it, don't search it.
+    const urlForReading = targets.find((target) => target.kind === "url");
+    if (urlForReading && SUMMARIZE_PATTERN.test(message)) {
+      const reader = getSkill("article-reader");
+      if (reader) {
+        addStep(reader, urlForReading);
+      }
     }
     if (attachments.length > 0) {
       const review = getSkill("attachment-review");
@@ -569,6 +707,56 @@ export function buildPlan(request: AgentRequest): Plan {
       mode,
       intent,
     };
+  }
+
+  // A product link (or product ask) with price intent: hunt offers across
+  // stores instead of treating the link as a security target to dissect.
+  const offersAsk =
+    intent.webTask === "offers" ||
+    (OFFERS_PATTERN.test(message) && targets.some((target) => target.kind === "url"));
+  if (offersAsk) {
+    const openWeb = getSkill("open-web");
+    const productTarget =
+      targets.find((target) => target.kind === "url") ??
+      targetLike(intent.topic || message);
+    if (openWeb) {
+      addStep(openWeb, {
+        ...productTarget,
+        meta: {
+          ...(productTarget.meta ?? {}),
+          webTask: "offers",
+          query: intent.topic || productTarget.value,
+        },
+      });
+      const mode: Plan["mode"] = "focused";
+      return {
+        targets,
+        steps,
+        rationale:
+          "A price question about a product — the product is identified (its page is read when a link was given), then the open web is searched for the same product on other stores so prices can be compared side by side.",
+        mode,
+        intent,
+      };
+    }
+  }
+
+  // A summarise ask over a pasted link: read it, then answer from its text.
+  const summarizeTarget = targets.find((target) => target.kind === "url");
+  // A link handed over with a summarise/read ask is *the* subject — reading it
+  // beats searching around it, whatever else the phrasing mentions.
+  if (summarizeTarget && SUMMARIZE_PATTERN.test(message)) {
+    const reader = getSkill("article-reader");
+    if (reader) {
+      addStep(reader, summarizeTarget);
+      return {
+        targets,
+        steps,
+        rationale:
+          "The link was handed over to be read — the article text is pulled out of the page, key points extracted, and nothing else is run.",
+        mode: "focused",
+        intent,
+      };
+    }
   }
 
   for (const target of targets) {
@@ -672,7 +860,11 @@ export function buildPlan(request: AgentRequest): Plan {
 
   // Media and news asks alongside a hard target: the analyst wants both.
   for (const kind of intent.kinds) {
-    addRetrieval(kind, hardTargets[0]?.value ?? intent.topic);
+    addRetrieval(
+      kind,
+      hardTargets[0]?.value ?? intent.topic,
+      kind === "news" || kind === "article" ? { country: newsCountry ?? "" } : {},
+    );
   }
   if (
     attachments.length > 0 &&

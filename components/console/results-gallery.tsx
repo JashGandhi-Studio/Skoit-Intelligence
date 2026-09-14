@@ -2,19 +2,25 @@
 
 import {
   AudioLines,
+  BookOpen,
   Download,
   ExternalLink,
   FileText,
   Image as ImageIcon,
   Images,
   Music2,
+  Play,
   ShieldCheck,
+  Sparkles,
   TriangleAlert,
   Video,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import type { ViewerRequest } from "@/components/console/viewers";
 import { Badge } from "@/components/ui/badge";
+import { forceDownload } from "@/lib/client/download";
+import { looksLikePdf } from "@/lib/client/web-search";
 import type { ArticleItem, MediaItem } from "@/lib/types";
 
 import { cn, truncate } from "@/lib/utils";
@@ -85,6 +91,12 @@ function AudioLine({ item }: { item: MediaItem }) {
             </span>
           </p>
         </div>
+        {item.exact ? (
+          <span className="flex shrink-0 items-center gap-1 rounded-full border border-success/40 bg-success/10 px-1.5 py-0.5 text-[9.5px] font-medium text-success">
+            <Sparkles className="size-2.5" />
+            exact match
+          </span>
+        ) : null}
         <div className="flex shrink-0 items-center gap-1">
           {item.pageUrl ? (
             <a
@@ -98,17 +110,29 @@ function AudioLine({ item }: { item: MediaItem }) {
             </a>
           ) : null}
           {downloadable ? (
-            <a
-              href={item.url}
-              download
-              target="_blank"
-              rel="noreferrer noopener"
+            <button
+              type="button"
               aria-label={`Download ${item.title}`}
-              onClick={() => toast.message(`Downloading from ${item.source}`)}
+              onClick={() =>
+                void forceDownload(
+                  item.url,
+                  `${item.title}${item.artist ? ` - ${item.artist}` : ""}`,
+                  {
+                    ext: ".mp3",
+                    prefix: "skoit-track",
+                  },
+                ).then((result) => {
+                  toast[result.mode === "failed" ? "error" : "success"](
+                    result.mode === "failed"
+                      ? "The source refused a direct copy — it opened in a tab instead"
+                      : `Saved ${result.filename}`,
+                  );
+                })
+              }
               className="grid size-7 place-items-center rounded-lg border border-hairline text-primary-strong transition-colors hover:bg-primary-soft"
             >
               <Download className="size-3.5" />
-            </a>
+            </button>
           ) : null}
         </div>
       </div>
@@ -131,11 +155,22 @@ function AudioLine({ item }: { item: MediaItem }) {
   );
 }
 
-function ImageTile({ item }: { item: MediaItem }) {
+function ImageTile({
+  item,
+  onOpenViewer,
+}: {
+  item: MediaItem;
+  onOpenViewer: (request: ViewerRequest) => void;
+}) {
   const reusable = isReusable(item);
   return (
     <figure className="group overflow-hidden rounded-xl border border-hairline bg-surface">
-      <div className="relative aspect-[4/3] overflow-hidden bg-surface-2">
+      <button
+        type="button"
+        onClick={() => onOpenViewer({ type: "image", item })}
+        className="relative block aspect-[4/3] w-full cursor-zoom-in overflow-hidden bg-surface-2"
+        aria-label={`View ${item.title}`}
+      >
         {item.thumbnailUrl ? (
           // biome-ignore lint/performance/noImgElement: thumbnails must come from the source's own CDN.
           <img
@@ -153,14 +188,14 @@ function ImageTile({ item }: { item: MediaItem }) {
         )}
         <span
           className={cn(
-            "absolute bottom-1.5 left-1.5 inline-flex max-w-[calc(100%-12px)] items-center gap-1 rounded-full px-1.5 py-0.5 text-[9.5px] font-medium backdrop-blur",
+            "pointer-events-none absolute bottom-1.5 left-1.5 inline-flex max-w-[calc(100%-12px)] items-center gap-1 rounded-full px-1.5 py-0.5 text-[9.5px] font-medium backdrop-blur",
             reusable ? "bg-success/85 text-background" : "bg-warning/85 text-background",
           )}
         >
           {reusable ? <ShieldCheck className="size-2.5" /> : null}
           <span className="truncate">{licenceLabel(item)}</span>
         </span>
-      </div>
+      </button>
       <figcaption className="p-2">
         <p className="line-clamp-2 text-[11.5px] leading-snug text-foreground">
           {item.title}
@@ -180,24 +215,38 @@ function ImageTile({ item }: { item: MediaItem }) {
             <ExternalLink className="size-3" />
             Source
           </a>
-          <a
-            href={item.url}
-            download
-            target="_blank"
-            rel="noreferrer noopener"
-            onClick={() => toast.message(`Downloading from ${item.source}`)}
+          <button
+            type="button"
+            onClick={() =>
+              void forceDownload(item.url, item.title, { prefix: "skoit-image" }).then(
+                (result) => {
+                  toast[result.mode === "failed" ? "error" : "success"](
+                    result.mode === "failed"
+                      ? "The source refused a direct copy — it opened in a tab instead"
+                      : `Saved ${result.filename}`,
+                  );
+                },
+              )
+            }
             className="flex items-center gap-1 rounded-lg border border-hairline px-1.5 py-1 text-[10.5px] text-primary-strong transition-colors hover:bg-primary-soft"
           >
             <Download className="size-3" />
             Download
-          </a>
+          </button>
         </div>
       </figcaption>
     </figure>
   );
 }
 
-function ClipRow({ item }: { item: MediaItem }) {
+function ClipRow({
+  item,
+  onOpenViewer,
+}: {
+  item: MediaItem;
+  onOpenViewer: (request: ViewerRequest) => void;
+}) {
+  const embeddable = Boolean(item.embedUrl);
   return (
     <li className="flex items-center gap-2.5 rounded-xl border border-hairline bg-surface p-2">
       <span className="relative grid h-12 w-[68px] shrink-0 place-items-center overflow-hidden rounded-lg border border-hairline bg-surface-2">
@@ -231,6 +280,36 @@ function ClipRow({ item }: { item: MediaItem }) {
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          aria-label={`Play ${item.title} in the console`}
+          onClick={() => onOpenViewer({ type: "video", item })}
+          className="flex h-7 items-center gap-1 rounded-lg border border-primary/40 bg-primary-soft px-2 text-[10.5px] font-medium text-primary-strong transition-colors hover:bg-primary/20"
+        >
+          <Play className="size-3" />
+          {embeddable ? "Play" : "Watch"}
+        </button>
+        {!embeddable ? (
+          <button
+            type="button"
+            aria-label={`Download ${item.title}`}
+            onClick={() =>
+              void forceDownload(item.url, item.title, {
+                ext: ".mp4",
+                prefix: "skoit-clip",
+              }).then((result) => {
+                toast[result.mode === "failed" ? "error" : "success"](
+                  result.mode === "failed"
+                    ? "The source refused a direct copy — it opened in a tab instead"
+                    : `Saved ${result.filename}`,
+                );
+              })
+            }
+            className="grid size-7 place-items-center rounded-lg border border-hairline text-primary-strong transition-colors hover:bg-primary-soft"
+          >
+            <Download className="size-3.5" />
+          </button>
+        ) : null}
         <a
           href={item.pageUrl ?? item.url}
           target="_blank"
@@ -240,55 +319,87 @@ function ClipRow({ item }: { item: MediaItem }) {
         >
           <ExternalLink className="size-3.5" />
         </a>
-        <a
-          href={item.url}
-          download
-          target="_blank"
-          rel="noreferrer noopener"
-          aria-label={`Download ${item.title}`}
-          onClick={() => toast.message(`Downloading from ${item.source}`)}
-          className="grid size-7 place-items-center rounded-lg border border-hairline text-primary-strong transition-colors hover:bg-primary-soft"
-        >
-          <Download className="size-3.5" />
-        </a>
       </div>
     </li>
   );
 }
 
-function ArticleRow({ item }: { item: ArticleItem }) {
+function ArticleRow({
+  item,
+  onOpenViewer,
+}: {
+  item: ArticleItem;
+  onOpenViewer: (request: ViewerRequest) => void;
+}) {
   const independent = (item.corroborations ?? 0) > 0;
+  const isPdf = looksLikePdf(item.url);
   return (
-    <li className="rounded-xl border border-hairline bg-surface p-2.5">
-      <a
-        href={item.url}
-        target="_blank"
-        rel="noreferrer noopener"
-        className="text-[12.5px] leading-snug font-medium text-foreground hover:text-primary-strong"
+    <li className="rounded-xl border border-hairline bg-surface p-2.5 transition-colors hover:border-primary/30">
+      <button
+        type="button"
+        onClick={() =>
+          isPdf
+            ? onOpenViewer({ type: "pdf", url: item.url, title: item.title })
+            : onOpenViewer({ type: "article", article: item })
+        }
+        className="text-left text-[12.5px] leading-snug font-medium text-foreground transition-colors hover:text-primary-strong"
       >
         {item.title}
-      </a>
+      </button>
       {item.snippet ? (
         <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
           {item.snippet}
         </p>
       ) : null}
 
-      <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-muted-foreground">
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-muted-foreground">
         <span>{item.domain}</span>
         {item.publishedAt ? (
           <span className="tabular">
             {new Date(item.publishedAt).toISOString().slice(0, 10)}
           </span>
         ) : null}
-        <Badge tone={independent ? "success" : "warning"} mono>
-          {independent
-            ? `+${item.corroborations} independent source(s)`
-            : item.syndicated
-              ? "syndicated"
-              : "single source"}
-        </Badge>
-      </p>
+        {independent ? (
+          <Badge tone="success" mono>
+            +{item.corroborations} independent source(s)
+          </Badge>
+        ) : null}
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() =>
+              isPdf
+                ? onOpenViewer({ type: "pdf", url: item.url, title: item.title })
+                : onOpenViewer({ type: "article", article: item })
+            }
+            className="inline-flex items-center gap-1 rounded-lg border border-primary/40 bg-primary-soft px-2 py-1 text-[10.5px] font-medium text-primary-strong transition-colors hover:bg-primary/20"
+          >
+            {isPdf ? <FileText className="size-3" /> : <BookOpen className="size-3" />}
+            {isPdf ? "Open PDF" : "Read"}
+          </button>
+          {isPdf ? (
+            <button
+              type="button"
+              onClick={() =>
+                void forceDownload(item.url, item.title, {
+                  ext: ".pdf",
+                  prefix: "skoit-pdf",
+                }).then((result) => {
+                  toast[result.mode === "failed" ? "error" : "success"](
+                    result.mode === "failed"
+                      ? "The source refused a direct copy — it opened in a tab instead"
+                      : `Saved ${result.filename}`,
+                  );
+                })
+              }
+              className="inline-flex items-center gap-1 rounded-lg border border-hairline px-2 py-1 text-[10.5px] text-primary-strong transition-colors hover:bg-primary-soft"
+            >
+              <Download className="size-3" />
+              Download
+            </button>
+          ) : null}
+        </div>
+      </div>
     </li>
   );
 }
@@ -296,9 +407,11 @@ function ArticleRow({ item }: { item: ArticleItem }) {
 export function ResultsGallery({
   media,
   articles,
+  onOpenViewer,
 }: {
   media?: MediaItem[];
   articles?: ArticleItem[];
+  onOpenViewer: (request: ViewerRequest) => void;
 }) {
   const items = media ?? [];
   const reports = articles ?? [];
@@ -349,7 +462,7 @@ export function ResultsGallery({
       {images.length > 0 ? (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           {images.slice(0, 16).map((item) => (
-            <ImageTile key={item.id} item={item} />
+            <ImageTile key={item.id} item={item} onOpenViewer={onOpenViewer} />
           ))}
         </div>
       ) : null}
@@ -376,7 +489,7 @@ export function ResultsGallery({
           </p>
           <ul className="space-y-2">
             {clips.slice(0, 10).map((item) => (
-              <ClipRow key={item.id} item={item} />
+              <ClipRow key={item.id} item={item} onOpenViewer={onOpenViewer} />
             ))}
           </ul>
         </div>
@@ -390,14 +503,16 @@ export function ResultsGallery({
           </p>
           <ul className="space-y-2">
             {reports.slice(0, 10).map((item) => (
-              <ArticleRow key={item.id} item={item} />
+              <ArticleRow key={item.id} item={item} onOpenViewer={onOpenViewer} />
             ))}
           </ul>
         </div>
       ) : null}
 
       <p className="border-t border-hairline pt-2 text-[10.5px] leading-relaxed text-faint-foreground">
-        Files are served by the source that published them — nothing is rehosted here.
+        Tap anything to open it in the console — reader, player or viewer — and download
+        it from there. Files are served by the source that published them — nothing is
+        rehosted here.
         {unlicensed > 0
           ? ` ${unlicensed} item(s) state no licence: check the source page before you reuse them.`
           : ""}

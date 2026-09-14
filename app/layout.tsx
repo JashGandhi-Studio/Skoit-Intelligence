@@ -9,6 +9,21 @@ export const metadata: Metadata = {
     "An open-source-intelligence console: it collects from real public sources, shows its coverage honestly, and saves every case file locally.",
   applicationName: "SkOiT",
   robots: { index: false, follow: false },
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon.svg", type: "image/svg+xml", sizes: "any" },
+    ],
+    apple: [{ url: "/icon.svg" }],
+    shortcut: ["/icon.svg"],
+  },
+  openGraph: {
+    title: "SkOiT · OSINT analyst console",
+    description:
+      "Find images, video, music, news and answers from real public sources — with the sources attached. Cases stay on your machine.",
+    siteName: "SkOiT",
+    type: "website",
+  },
 };
 
 export const viewport: Viewport = {

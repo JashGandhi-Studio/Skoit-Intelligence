@@ -1,9 +1,12 @@
 "use client";
 
 import {
+  BookOpen,
   FileJson,
+  FileStack,
   FileText,
   Plus,
+  QrCode,
   Search,
   Settings,
   Star,
@@ -30,6 +33,9 @@ export function CaseSidebar({
   onTogglePin,
   onImport,
   onOpenSettings,
+  onOpenWorkshop,
+  onOpenQr,
+  onOpenGuide,
   onClose,
   egress,
   skillCount,
@@ -42,6 +48,9 @@ export function CaseSidebar({
   onTogglePin: (caseFile: CaseFile) => void;
   onImport: (caseFile: CaseFile) => void;
   onOpenSettings: () => void;
+  onOpenWorkshop?: () => void;
+  onOpenQr?: () => void;
+  onOpenGuide?: () => void;
   onClose?: () => void;
   egress: boolean | null;
   skillCount: number;
@@ -69,6 +78,16 @@ export function CaseSidebar({
       <header className="flex items-center justify-between px-3.5 py-3.5">
         <SkoitWordmark />
         <div className="flex items-center gap-1">
+          <Tip label="What SkOiT can do — the guided tour">
+            <Button
+              variant="ghost"
+              size="iconSm"
+              onClick={onOpenGuide}
+              aria-label="Guide"
+            >
+              <BookOpen />
+            </Button>
+          </Tip>
           <Tip label="Console settings, keys and capabilities">
             <Button
               variant="ghost"
@@ -93,10 +112,18 @@ export function CaseSidebar({
         </div>
       </header>
 
-      <div className="px-3.5">
+      <div className="space-y-1.5 px-3.5">
         <Button variant="primary" size="md" className="w-full" onClick={onCreate}>
           <Plus /> New case file
         </Button>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Button variant="outline" size="sm" className="w-full" onClick={onOpenWorkshop}>
+            <FileStack className="text-primary" /> Documents
+          </Button>
+          <Button variant="outline" size="sm" className="w-full" onClick={onOpenQr}>
+            <QrCode className="text-primary" /> QR Studio
+          </Button>
+        </div>
       </div>
 
       <div className="relative px-3.5 pt-3">

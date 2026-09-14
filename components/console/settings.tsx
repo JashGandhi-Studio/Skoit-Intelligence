@@ -23,6 +23,7 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/field";
 import { Skeleton, Switch, Tab, TabContent, TabList, Tabs } from "@/components/ui/misc";
 import { persistPreferences } from "@/lib/client/preferences";
+import { NEWS_EDITIONS } from "@/lib/news-editions";
 import { mergePreferences } from "@/lib/preferences";
 import type { AnswerPreferences } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -298,6 +299,61 @@ export function SettingsDialog({
 
           <TabContent value="answers">
             <div className="space-y-5">
+              <section>
+                <p className="flex items-center gap-2 text-[12.5px] font-medium text-foreground">
+                  You
+                </p>
+                <p className="mt-0.5 mb-2.5 text-[11.5px] text-muted-foreground">
+                  Your name personalises greetings; your country decides what “latest
+                  news” means. Both are optional and stay on this machine — the console
+                  also picks them up when you just say “I'm from Japan”.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label htmlFor="skoit-user-name" className="block">
+                    <span className="mb-1 block text-[11px] font-medium tracking-wide text-faint-foreground uppercase">
+                      Your name
+                    </span>
+                    <Input
+                      id="skoit-user-name"
+                      defaultValue={preferences.userName ?? ""}
+                      placeholder="e.g. Jash"
+                      className="h-9 text-[13px]"
+                      onBlur={(event) => {
+                        const value = event.target.value.trim();
+                        if (
+                          (value || preferences.userName) &&
+                          value !== (preferences.userName ?? "")
+                        ) {
+                          void patchPreferences({ userName: value || undefined });
+                        }
+                      }}
+                    />
+                  </label>
+                  <label htmlFor="skoit-news-country" className="block">
+                    <span className="mb-1 block text-[11px] font-medium tracking-wide text-faint-foreground uppercase">
+                      News country
+                    </span>
+                    <select
+                      id="skoit-news-country"
+                      value={preferences.country ?? ""}
+                      onChange={(event) =>
+                        void patchPreferences({
+                          country: event.target.value || undefined,
+                        })
+                      }
+                      className="h-9 w-full rounded-[10px] border border-hairline-strong bg-surface px-2.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                    >
+                      <option value="">Not set — the console will ask</option>
+                      {NEWS_EDITIONS.map((edition) => (
+                        <option key={edition.code} value={edition.code}>
+                          {edition.flag} {edition.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </section>
+
               <section>
                 <div className="flex items-center justify-between gap-3">
                   <div>
