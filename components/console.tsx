@@ -930,9 +930,9 @@ export function Console() {
                         </button>
                         {noticeOpen ? (
                           <ul className="space-y-1 border-t border-hairline px-3.5 py-2.5">
-                            {turn.notices.map((notice, noticeIndex) => (
+                            {turn.notices.map((notice) => (
                               <li
-                                key={`${turn.id}-notice-${noticeIndex}-${notice.level}`}
+                                key={notice.id}
                                 className={cn(
                                   "text-[12px] leading-relaxed",
                                   notice.level === "error"

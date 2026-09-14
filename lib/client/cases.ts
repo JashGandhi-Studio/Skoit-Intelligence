@@ -80,7 +80,7 @@ export type TurnView = {
   model?: string;
   media: MediaItem[];
   articles: ArticleItem[];
-  notices: Array<{ level: string; message: string }>;
+  notices: Array<{ id: string; level: string; message: string }>;
   stats?: { steps: number; evidence: number; entities: number; sources: number };
   clientPassRan?: boolean;
 };
@@ -205,7 +205,7 @@ export function applyEvent(turn: TurnView, event: AgentEvent): TurnView {
         ...turn,
         notices: [
           ...turn.notices.slice(-16),
-          { level: event.level, message: event.message },
+          { id: newId("nt"), level: event.level, message: event.message },
         ],
       };
     case "turn:done":
