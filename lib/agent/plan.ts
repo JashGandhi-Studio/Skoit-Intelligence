@@ -61,7 +61,7 @@ const LEADING_NOISE =
   /^\s*(?:please|pls|kindly|hey|hi+|hello+|ok|okay|so|now|then|can you|could you|would you|i want|i need|i would like|give me|gimme|show me|find me|get me|fetch me|search for|search|look for|look up|pull up|tell me|explain)\b[\s,]*/i;
 
 const REQUEST_NOISE =
-  /\b(please|pls|kindly|okay|can you|could you|would you|i want|i need|i would like|give me|gimme|show me|find me|get me|fetch me|search for|search|look for|look up|pull up|tell me about|tell me|download|free|reusable|royalty[\s-]?free|licen[cs]e[\s-]?free|licen[cs]ed|unlimited|no copyright|copyright free|creative commons|cc0|public domain|full|complete|file|files|song|songs|music|audio|mp3|track|tracks|tune|tunes|play|playback|listen|streaming|b[\s-]?roll|broll|stock|clips?|footage|videos?|images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|articles?|blogs?|news|latest|headlines?|breaking|exhaustive|sweep|everything|about|regarding|related to|for|of|on|some|any|the|a|an|chahiye|chaiye|dikhao|dikha|do|de|dedo|la|bhej|mujhe|mujhko|batao|bata|dekhna|dekhni|chahta|chahti|kuch|koi|bare|baare|mein|ki|ka|ke|hai|hain|kya|liye|wala|wali|aap|aapko|sakte|sakta|sakti|ho|hun|hu|kar|karke|karo|suno|sunao|sunna|gaana|gana|geet|sangeet|dhun|bajao|na|ek|this|these|those|is|was|are|were|it|its|that|shown|above|below|attached|who is|who was|who are|what is|what was|what are|where is|when was|meaning of|definition of|history of|information on|about|me|my|mine|us|our)\b/gi;
+  /\b(please|pls|kindly|okay|can you|could you|would you|i want|i need|i would like|give me|gimme|show me|find me|get me|fetch me|search for|search|look for|look up|pull up|tell me about|tell me|download|free|reusable|royalty[\s-]?free|licen[cs]e[\s-]?free|licen[cs]ed|unlimited|no copyright|copyright free|creative commons|cc0|public domain|full|complete|file|files|song|songs|music|audio|mp3|track|tracks|tune|tunes|play|playback|listen|streaming|b[\s-]?roll|broll|stock|clips?|footage|videos?|images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|articles?|blogs?|news|latest|headlines?|breaking|exhaustive|sweep|everything|about|regarding|related to|for|of|on|some|any|the|a|an|chahiye|chaiye|dikhao|dikha|do|de|dedo|la|bhej|mujhe|mujhko|batao|bata|dekhna|dekhni|chahta|chahti|kuch|koi|bare|baare|mein|ki|ka|ke|hai|hain|kya|liye|wala|wali|aap|aapko|sakte|sakta|sakti|ho|hun|hu|kar|karke|karo|suno|sunao|sunna|gaana|gana|geet|sangeet|dhun|bajao|na|ek|this|these|those|is|was|are|were|it|its|that|shown|above|below|attached|who is|who was|who are|what is|what was|what are|where is|when was|meaning of|definition of|history of|information on|about|me|my|mine|us|our|link|links|and|or|if|but|to|use|usable|reuse|reusable|commercial|attribution|permission)\b/gi;
 
 /**
  * Devanagari request words. JS \b does not treat Devanagari as word characters,
@@ -83,6 +83,8 @@ export function cleanTopic(message: string): string {
     // instruction, not part of the subject being searched.
     .replace(/\((?:full|deep)\s+sweep\)/gi, " ")
     .replace(REQUEST_NOISE, " ")
+    .replace(/[—–]/g, " ")
+    .replace(/\s-\s/g, " ")
     .replace(/[?!.]+$/g, " ")
     .replace(/\s+/g, " ")
     .trim();
