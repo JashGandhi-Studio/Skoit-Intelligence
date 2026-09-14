@@ -580,6 +580,25 @@ export function SettingsDialog({
                   })}
                 </ul>
               </section>
+
+              <section className="rounded-xl border border-hairline bg-surface p-3.5">
+                <p className="text-[12.5px] font-semibold tracking-tight text-foreground">
+                  SkOiT
+                </p>
+                <p className="mt-1 text-[12px] text-muted-foreground">
+                  App by <span className="font-medium text-foreground">Jash Gandhi</span>
+                </p>
+                <a
+                  href="mailto:jashgandhicreator07@gmail.com"
+                  className="mt-1.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  jashgandhicreator07@gmail.com
+                </a>
+                <p className="mt-2 text-[10.5px] leading-relaxed text-faint-foreground">
+                  Local-first console: cases, keys and preferences never leave this
+                  machine. Feedback and feature requests are welcome at the address above.
+                </p>
+              </section>
             </div>
           </TabContent>
 

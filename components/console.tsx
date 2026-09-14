@@ -1137,6 +1137,7 @@ export function Console() {
 
                     {turn.answer ? (
                       <Briefing
+                        allowFreeAi={preferences.ai !== "off"}
                         turn={turn}
                         caseTitle={active?.title ?? "case"}
                         onQuickPrompt={runPrompt}
@@ -1200,7 +1201,7 @@ export function Console() {
           title="Map & Globe"
           description="The whole planet — zoom from orbit to street level, tap any spot to know what is there."
           className="h-[min(80dvh,760px)] w-[calc(100vw-1.5rem)] sm:max-w-[920px]"
-          bodyClassName="p-0"
+          bodyClassName="relative p-0"
         >
           <MapExplorer initialQuery={mapQuery || undefined} />
         </DialogContent>

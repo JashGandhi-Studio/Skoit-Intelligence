@@ -8,9 +8,10 @@ import {
   Globe2,
   Printer,
   ShieldCheck,
+  Sparkles,
   Volume2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -18,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/misc";
 import type { TurnView } from "@/lib/client/cases";
+import { freeAiPolish } from "@/lib/client/free-ai";
 import { buildStyledPdf, markdownishToInput } from "@/lib/client/pdf-make";
 import { NEWS_EDITIONS, QUICK_COUNTRY_CODES } from "@/lib/news-editions";
 import { copyText, download } from "@/lib/utils";
@@ -26,12 +28,43 @@ export function Briefing({
   turn,
   caseTitle,
   onQuickPrompt,
+  allowFreeAi = true,
 }: {
   turn: TurnView;
   caseTitle: string;
   onQuickPrompt?: (prompt: string) => void;
+  /** free keyless AI polish — off when the user switched AI off in Settings */
+  allowFreeAi?: boolean;
 }) {
   const [speaking, setSpeaking] = useState(false);
+  const [polish, setPolish] = useState<string | null>(null);
+  const [polishing, setPolishing] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const polishAttemptedFor = useRef<string | null>(null);
+
+  // Free AI, no key: when the deterministic analyst writer produced the
+  // briefing, offer a keyless model REWORDING of that exact text. Facts must
+  // survive (free-ai.ts enforces it structurally); failure is silent — the
+  // deterministic briefing is always complete on its own.
+  useEffect(() => {
+    const answer = turn.answer ?? "";
+    const eligible =
+      allowFreeAi &&
+      turn.answerMode === "analyst" &&
+      !answer.includes("{{ASK_COUNTRY}}") &&
+      answer.length >= 180;
+    if (!eligible || polishAttemptedFor.current === answer) {
+      return;
+    }
+    polishAttemptedFor.current = answer;
+    setPolishing(true);
+    const controller = new AbortController();
+    freeAiPolish(answer, { signal: controller.signal })
+      .then((reworded) => setPolish(reworded))
+      .catch(() => setPolish(null))
+      .finally(() => setPolishing(false));
+    return () => controller.abort();
+  }, [allowFreeAi, turn.answer, turn.answerMode]);
 
   useEffect(() => {
     return () => {
@@ -88,6 +121,7 @@ export function Briefing({
     .replace("{{ASK_COUNTRY}}", "")
     .trim()
     .replace(/\[(\d{1,2})\]/g, (_match, index) => `[${index}](#source-${index})`);
+  const display = polish && !showOriginal ? polish : markdown;
 
   const saveAsPdf = async () => {
     const sections = markdownishToInput(
@@ -167,6 +201,34 @@ export function Briefing({
         </div>
       </header>
 
+      {polishing || polish ? (
+        <div className="no-print flex flex-wrap items-center gap-2 border-b border-hairline bg-primary-soft/40 px-4 py-2">
+          <Sparkles className="size-3.5 text-primary" />
+          {polishing ? (
+            <span className="text-[11.5px] text-muted-foreground">
+              Free AI is rewording this briefing — no key needed, facts stay locked…
+            </span>
+          ) : (
+            <>
+              <Badge tone="primary" mono>
+                free-AI polish
+              </Badge>
+              <span className="text-[11px] text-muted-foreground">
+                wording only — every fact and number is unchanged
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto"
+                onClick={() => setShowOriginal((current) => !current)}
+              >
+                {showOriginal ? "Show polished" : "Show original"}
+              </Button>
+            </>
+          )}
+        </div>
+      ) : null}
+
       <div className="prose-skoit prose prose-sm max-w-none px-4 py-3.5 dark:prose-invert">
         <Markdown
           remarkPlugins={[remarkGfm]}
@@ -219,7 +281,7 @@ export function Briefing({
             },
           }}
         >
-          {markdown}
+          {display}
         </Markdown>
       </div>
 

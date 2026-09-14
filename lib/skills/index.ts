@@ -1,5 +1,6 @@
 import type { SkillDefinition, TargetKind } from "@/lib/types";
 import { domainSkills } from "./domain";
+import { everydaySkills } from "./everyday";
 import { identitySkills } from "./identity";
 import { indiaSkills } from "./india";
 import { ipSkills } from "./ip";
@@ -10,6 +11,7 @@ import { verifySkills } from "./verify";
 import { webSkills } from "./web";
 
 export const allSkills: SkillDefinition[] = [
+  ...everydaySkills,
   ...domainSkills,
   ...ipSkills,
   ...identitySkills,

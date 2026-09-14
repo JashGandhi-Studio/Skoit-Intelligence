@@ -304,5 +304,70 @@ import { scriptOf } from "@/lib/client/translate";
   check("latin script", scriptOf("this is a test") === "en");
 }
 
+// ---- everyday skills: calculators & parsers ----
+import {
+  emiFor,
+  gstBreakup,
+  parseCurrencyAsk,
+  parseDefineAsk,
+  parseHolidayYear,
+  parseIndianAmount,
+  parseRatePercent,
+  parseTenureMonths,
+  sipFutureValue,
+} from "@/lib/skills/everyday";
+{
+  check("amount 25 lakh", parseIndianAmount("EMI for 25 lakh home loan") === 2_500_000);
+  check("amount 1.5 crore", parseIndianAmount("1.5 crore at 9%") === 15_000_000);
+  check("amount ₹4,999", parseIndianAmount("GST on ₹4,999") === 4_999);
+  check("amount 25k", parseIndianAmount("25k car loan") === 25_000);
+  check("rate 8.5%", parseRatePercent("at 8.5% for 20 years") === 8.5);
+  check("tenure years", parseTenureMonths("for 20 years") === 240);
+  check("tenure months", parseTenureMonths("18 months") === 18);
+
+  const emi = emiFor(2_500_000, 8.5, 240);
+  check("emi magnitude", emi > 21_600 && emi < 21_800);
+  check("sip value", Math.abs(sipFutureValue(5_000, 12, 60) - 412_432) < 300);
+
+  const ex = gstBreakup(4_999, 18, false);
+  check("gst exclusive", Math.round(ex.gross) === 5_899 && Math.round(ex.tax) === 900);
+  const inc = gstBreakup(4_999, 18, true);
+  check("gst inclusive", Math.round(inc.net) === 4_236 && Math.round(inc.tax) === 763);
+
+  check("currency ask", JSON.stringify(parseCurrencyAsk("convert 100 usd to inr")) === '{"amount":100,"from":"USD","to":"INR"}');
+  check("currency bare", parseCurrencyAsk("usd to inr")?.amount === 1);
+  check("define meaning of", parseDefineAsk("meaning of serendipity") === "serendipity");
+  check("define what does", parseDefineAsk("what does gregarious mean") === "gregarious");
+  check("holiday year default", parseHolidayYear("holidays in india") === new Date().getFullYear());
+}
+
+// ---- planner: everyday routing, no hijacking ----
+import { everydaySkillFor } from "@/lib/agent/plan";
+{
+  check("route emi", everydaySkillFor("calculate emi for 25 lakh at 8.5% for 20 years") === "calc-emi");
+  check("route sip", everydaySkillFor("sip of 5000 per month at 12% for 10 years") === "calc-sip");
+  check("route gst", everydaySkillFor("gst on 4999 at 18%") === "calc-gst");
+  check("no hijack gstin", everydaySkillFor("verify 27AAPFU0939F1ZV") === null);
+  check("no hijack news", everydaySkillFor("show the latest news") === null);
+  check("no hijack plain", everydaySkillFor("who is the chief minister of Maharashtra") === null);
+  check("route currency", everydaySkillFor("convert 250 usd to inr") === "currency-convert");
+  check("route define", everydaySkillFor("what does ephemeral mean") === "word-define");
+  check("route holidays", everydaySkillFor("holidays in india 2026") === "holiday-list");
+}
+
+// ---- free AI guards ----
+import { buildFreeAiUrl, isPlausiblePolish } from "@/lib/client/free-ai";
+{
+  const original =
+    "Found 3 independent reports. The claim first appeared on 12 March 2026 on example.com. Fact-checkers flagged it: 2 false, 1 misleading. Verdict: don't forward.";
+  const good = original.replace("Verdict: don't forward.", "The verdict is: don't forward this.");
+  const bad = "I am sorry, I cannot help with that request.";
+  const drifted = "Totally unrelated text about cricket scores.";
+  check("free-ai url shape", buildFreeAiUrl("x y").startsWith("https://text.pollinations.ai/"));
+  check("free-ai guard passes rewrite", isPlausiblePolish(original, good));
+  check("free-ai guard blocks refusal", !isPlausiblePolish(original, bad));
+  check("free-ai guard blocks drift", !isPlausiblePolish(original, drifted));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

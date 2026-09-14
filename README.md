@@ -4,7 +4,7 @@ A working open-source-intelligence workbench that runs on your own machine. It c
 public sources, shows exactly what it could **not** verify, scores the gaps as well as the findings,
 and saves every run as a case file you own.
 
-No accounts. No cloud database. No telemetry. 42 skills — 29 live against public endpoints, 13 offline
+No accounts. No cloud database. No telemetry. 48 skills — 33 live against public endpoints, 15 offline
 validators — and one rule enforced throughout: **nothing is asserted that was not collected.**
 
 ```
@@ -150,6 +150,15 @@ that leaks: author, title, authoring toolchain, creation/modification times, enc
 signatures, embedded JavaScript, embedded files and incremental edits after the first save. If the
 dictionary is compressed or stripped, it says that instead of guessing. Dictation uses the browser's
 speech recogniser (en-IN, hi-IN, mr-IN, ta-IN, te-IN, bn-IN, gu-IN, kn-IN, ml-IN, en-US).
+
+## Free AI, no key
+
+Without any API key the built-in analyst writer produces the briefing from the collected
+evidence — deterministic, no hallucination. On top of that, a keyless free model can reword
+that briefing for readability; the rewrite is guarded structurally (every number in the
+original must survive, length bounds, refusal detection), labelled "wording only — facts
+unchanged", and the original stays one tap away. Setting AI to "off" in Settings skips the
+free model entirely. A personal OpenAI-compatible key in Settings upgrades the writing.
 
 ## Keys and models
 

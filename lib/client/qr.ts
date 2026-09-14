@@ -74,6 +74,46 @@ export const QR_PRESETS: Array<{ name: string; design: Partial<QrDesign> }> = [
     },
   },
   {
+    name: "Grape",
+    design: {
+      fg: "#6d28d9",
+      bg: "#faf7ff",
+      gradient: "#c026d3",
+      moduleStyle: "rounded",
+      finderStyle: "rounded",
+    },
+  },
+  {
+    name: "Rose",
+    design: {
+      fg: "#be123c",
+      bg: "#fff5f7",
+      gradient: "#fb7185",
+      moduleStyle: "diamond",
+      finderStyle: "circle",
+    },
+  },
+  {
+    name: "Steel",
+    design: {
+      fg: "#334155",
+      bg: "#f8fafc",
+      gradient: null,
+      moduleStyle: "square",
+      finderStyle: "square",
+    },
+  },
+  {
+    name: "Mint",
+    design: {
+      fg: "#0f766e",
+      bg: "#f0fdfa",
+      gradient: "#34d399",
+      moduleStyle: "dot",
+      finderStyle: "rounded",
+    },
+  },
+  {
     name: "Sunset",
     design: {
       fg: "#c7348c",

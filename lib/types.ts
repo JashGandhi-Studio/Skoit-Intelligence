@@ -28,7 +28,8 @@ export type SkillCategory =
   | "media"
   | "retrieval"
   | "knowledge"
-  | "tradecraft";
+  | "tradecraft"
+  | "assist";
 
 export type SkillRuntime = "local" | "live";
 

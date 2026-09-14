@@ -1,6 +1,7 @@
 import { detectCountryStatement } from "@/lib/news-editions";
 import { detectPlaceInText } from "@/lib/news-places";
 import { getSkill, skillsMatchingText } from "@/lib/skills";
+import { parseCurrencyAsk, parseDefineAsk } from "@/lib/skills/everyday";
 import {
   detectTargets,
   looksLikeDomain,
@@ -596,6 +597,27 @@ export function buildPlan(request: AgentRequest): Plan {
     }
   }
 
+  // Everyday asks — EMI/SIP/GST math, currency, meanings, holidays — are
+  // single-skill jobs: the moment the phrasing matches, run exactly that and
+  // return, so no web sweep ever buries a simple arithmetic answer.
+  if (hardTargets.length === 0 && intent.webTask === undefined) {
+    const everyday = everydaySkillFor(message);
+    if (everyday) {
+      const skill = getSkill(everyday);
+      if (skill) {
+        addStep(skill, targetLike(message));
+        return {
+          targets,
+          steps,
+          rationale:
+            "An everyday calculation or lookup: one focused skill answers it on the spot — no web sweep needed.",
+          mode: "focused",
+          intent,
+        };
+      }
+    }
+  }
+
   const retrievalOnly = intent.kinds.length > 0 && hardTargets.length === 0;
 
   const provenanceAsk = PROVENANCE_KEYWORDS.test(message);
@@ -1018,6 +1040,35 @@ export function buildPlan(request: AgentRequest): Plan {
     mode,
     intent,
   };
+}
+
+/**
+ * Everyday single-skill routing. Patterns are deliberately tight so they
+ * never hijack a news/search/retrieval ask.
+ */
+export function everydaySkillFor(message: string): string | null {
+  const text = message.toLowerCase();
+  const hasFigure = /\d/.test(text);
+  if (/\bemi\b|instal?lments?\b|\bloan\b/.test(text) && hasFigure) {
+    return "calc-emi";
+  }
+  if (/\bsip\b|monthly invest|mutual fund/.test(text) && hasFigure) {
+    return "calc-sip";
+  }
+  if (/\bgst\b/.test(text) && hasFigure && !/[0-9a-z]{15}/i.test(message)) {
+    // 15+ alphanumerics present → a GSTIN verify, not GST arithmetic.
+    return "calc-gst";
+  }
+  if (parseCurrencyAsk(message)) {
+    return "currency-convert";
+  }
+  if (parseDefineAsk(message)) {
+    return "word-define";
+  }
+  if (/\bholidays?\b|bank holiday|public holiday/.test(text)) {
+    return "holiday-list";
+  }
+  return null;
 }
 
 function targetLike(value: string): DetectedTarget {

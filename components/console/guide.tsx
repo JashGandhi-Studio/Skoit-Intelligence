@@ -2,6 +2,7 @@
 
 import {
   BadgeCheck,
+  Calculator,
   FileStack,
   Forward,
   Globe2,
@@ -161,6 +162,20 @@ const SECTIONS: Array<{
     ],
   },
   {
+    icon: Calculator,
+    title: "Everyday tools",
+    items: [
+      {
+        say: "EMI for 25 lakh at 8.5% for 20 years",
+        note: "Loan EMI, total interest, total payable — instant, offline arithmetic. SIP projections and GST splits (inclusive or exclusive) work the same way.",
+      },
+      {
+        say: "Convert 100 usd to inr",
+        note: "Live ECB reference rates, no key. Also: “meaning of serendipity” and “holidays in india 2026”.",
+      },
+    ],
+  },
+  {
     icon: Globe2,
     title: "Map & Globe",
     items: [
@@ -279,9 +294,10 @@ export function Guide() {
       ))}
       <p className="border-t border-hairline pt-3 text-[10.5px] leading-relaxed text-faint-foreground">
         No accounts, no telemetry: cases, keys and preferences stay on this machine.
-        Sources are free public ones; the optional AI briefing model is configured in
-        Settings when you add a key — otherwise the built-in analyst writer answers from
-        the collected evidence alone.
+        Sources are free public ones. The briefing is always written from the collected
+        evidence: with no key the built-in analyst writes it, and SkOiT's free AI (no
+        signup, no key) can reword it with every fact locked — the original is one tap
+        away. A personal model key in Settings upgrades the writing further.
       </p>
     </div>
   );

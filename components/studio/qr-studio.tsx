@@ -43,6 +43,11 @@ const CONTENT_KINDS = [
   { id: "wifi", label: "Wi-Fi" },
   { id: "upi", label: "UPI pay" },
   { id: "vcard", label: "Contact card" },
+  { id: "phone", label: "Phone call" },
+  { id: "sms", label: "SMS" },
+  { id: "email", label: "Email" },
+  { id: "whatsapp", label: "WhatsApp" },
+  { id: "place", label: "Location" },
 ] as const;
 
 type ContentKind = (typeof CONTENT_KINDS)[number]["id"];
@@ -59,6 +64,14 @@ export function QrStudio() {
   const [upiName, setUpiName] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
+  const [phoneNo, setPhoneNo] = useState("");
+  const [smsNo, setSmsNo] = useState("");
+  const [smsMsg, setSmsMsg] = useState("");
+  const [emailAddr, setEmailAddr] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [waNo, setWaNo] = useState("");
+  const [waText, setWaText] = useState("");
+  const [placeCoords, setPlaceCoords] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [rendered, setRendered] = useState(false);
 
@@ -70,6 +83,33 @@ export function QrStudio() {
       return upiId
         ? `upi://pay?pa=${encodeURIComponent(upiId)}${upiName ? `&pn=${encodeURIComponent(upiName)}` : ""}&cu=INR`
         : "";
+    }
+    if (kind === "phone") {
+      return phoneNo ? `tel:${phoneNo.replace(/\s+/g, "")}` : "";
+    }
+    if (kind === "sms") {
+      return smsNo ? `smsto:${smsNo.replace(/\s+/g, "")}:${smsMsg || ""}` : "";
+    }
+    if (kind === "email") {
+      if (!emailAddr) {
+        return "";
+      }
+      const query = emailSubject ? `?subject=${encodeURIComponent(emailSubject)}` : "";
+      return `mailto:${emailAddr}${query}`;
+    }
+    if (kind === "whatsapp") {
+      if (!waNo) {
+        return "";
+      }
+      const digits = waNo.replace(/[^\d]/g, "");
+      return `https://wa.me/${digits}${waText ? `?text=${encodeURIComponent(waText)}` : ""}`;
+    }
+    if (kind === "place") {
+      const coords = placeCoords.replace(/\s+/g, "");
+      if (!/^[-+]?\d{1,2}(\.\d+)?,[-+]?\d{1,3}(\.\d+)?$/.test(coords)) {
+        return "";
+      }
+      return `geo:${coords}`;
     }
     if (kind === "vcard") {
       return contactName
@@ -85,7 +125,24 @@ export function QrStudio() {
         : "";
     }
     return design.text;
-  }, [kind, design.text, ssid, wifiPassword, upiId, upiName, contactName, contactPhone]);
+  }, [
+    kind,
+    design.text,
+    ssid,
+    wifiPassword,
+    upiId,
+    upiName,
+    contactName,
+    contactPhone,
+    phoneNo,
+    smsNo,
+    smsMsg,
+    emailAddr,
+    emailSubject,
+    waNo,
+    waText,
+    placeCoords,
+  ]);
 
   const effective: QrDesign = useMemo(
     () => ({ ...design, text: payload || " " }),
@@ -229,6 +286,81 @@ export function QrStudio() {
               <p className="text-[11px] text-faint-foreground sm:col-span-2">
                 Opens any UPI app with the payee filled in. Double-check the ID before
                 sharing.
+              </p>
+            </div>
+          ) : null}
+          {kind === "phone" ? (
+            <div className="grid gap-2">
+              <Input
+                value={phoneNo}
+                onChange={(event) => setPhoneNo(event.target.value)}
+                placeholder="+91 98765 43210"
+                inputMode="tel"
+              />
+              <p className="text-[11px] text-faint-foreground">
+                Scanning dials the number — one tap before calling.
+              </p>
+            </div>
+          ) : null}
+          {kind === "sms" ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input
+                value={smsNo}
+                onChange={(event) => setSmsNo(event.target.value)}
+                placeholder="Number, e.g. +91 98765 43210"
+                inputMode="tel"
+              />
+              <Input
+                value={smsMsg}
+                onChange={(event) => setSmsMsg(event.target.value)}
+                placeholder="Prefilled message (optional)"
+              />
+            </div>
+          ) : null}
+          {kind === "email" ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input
+                value={emailAddr}
+                onChange={(event) => setEmailAddr(event.target.value)}
+                placeholder="someone@example.com"
+                inputMode="email"
+              />
+              <Input
+                value={emailSubject}
+                onChange={(event) => setEmailSubject(event.target.value)}
+                placeholder="Subject (optional)"
+              />
+            </div>
+          ) : null}
+          {kind === "whatsapp" ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input
+                value={waNo}
+                onChange={(event) => setWaNo(event.target.value)}
+                placeholder="Number with country code, e.g. 919876543210"
+                inputMode="tel"
+              />
+              <Input
+                value={waText}
+                onChange={(event) => setWaText(event.target.value)}
+                placeholder="Prefilled message (optional)"
+              />
+              <p className="text-[11px] text-faint-foreground sm:col-span-2">
+                Scanning opens the WhatsApp chat with the message typed.
+              </p>
+            </div>
+          ) : null}
+          {kind === "place" ? (
+            <div className="grid gap-2">
+              <Input
+                value={placeCoords}
+                onChange={(event) => setPlaceCoords(event.target.value)}
+                placeholder="Latitude, longitude — e.g. 19.0760, 72.8777"
+                inputMode="text"
+              />
+              <p className="text-[11px] text-faint-foreground">
+                Scanning opens the spot in any maps app. Get coordinates from SkOiT&apos;s
+                Map &amp; Globe — tap a spot and copy them from the card.
               </p>
             </div>
           ) : null}

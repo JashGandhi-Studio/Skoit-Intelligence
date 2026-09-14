@@ -6,15 +6,34 @@
  * learn what is there (reverse-geocoded + a Wikipedia summary), search any
  * place and fly to it, or hit the locate button to drop onto where you are.
  *
- * Tiles/styles/search all load in the visitor's browser from free public
- * endpoints (OpenFreeMap → OSM raster fallback, Nominatim, Wikipedia) via
- * the shared relay chain, so nothing here needs keys or a server.
+ * Tile strategy (all keyless, all loaded by your browser):
+ *  1. CARTO Voyager raster — the dependable primary, CORS-open worldwide.
+ *  2. If tiles keep failing (blocked network, captive portal), the map swaps
+ *     itself to OpenStreetMap's tiles automatically.
+ *  3. OpenFreeMap's vector style is attempted as an upgrade through the same
+ *     relay chain the rest of the console uses; if it never arrives, the
+ *     raster map you already see just stays.
+ * The globe projection is applied to whichever style wins.
  */
 
-import type { Marker, Map as MlMap } from "maplibre-gl";
+import type {
+  ErrorEvent,
+  MapMouseEvent,
+  Marker,
+  Map as MlMap,
+  StyleSpecification,
+} from "maplibre-gl";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Globe2, Loader2, LocateFixed, Map as MapIcon, Search, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Globe2,
+  Loader2,
+  LocateFixed,
+  Map as MapIcon,
+  Search,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isRelayOk, relayJson } from "@/lib/client/cors-fetch";
 import { cn } from "@/lib/utils";
@@ -36,22 +55,37 @@ type PlaceInfo = {
   wikiUrl?: string;
 };
 
-/** OpenFreeMap serves free vector tiles without a key; OSM raster is the fallback. */
-const VECTOR_STYLE = "https://tiles.openfreemap.org/styles/liberty";
-const RASTER_STYLE = {
-  version: 8 as const,
-  projection: { type: "globe" as const },
-  sources: {
-    osm: {
-      type: "raster" as const,
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      maxzoom: 19,
-      attribution: "© OpenStreetMap contributors",
+/** Keyless raster basemap that behaves everywhere; OSM tiles are the fallback. */
+function rasterStyle(primary: "carto" | "osm"): StyleSpecification {
+  return {
+    version: 8,
+    projection: { type: "globe" },
+    sources: {
+      basemap: {
+        type: "raster",
+        tiles:
+          primary === "carto"
+            ? [
+                "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
+                "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
+              ]
+            : ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution:
+          primary === "carto"
+            ? "© OpenStreetMap contributors © CARTO"
+            : "© OpenStreetMap contributors",
+      },
     },
-  },
-  layers: [{ id: "osm", type: "raster" as const, source: "osm" }],
-};
+    layers: [
+      { id: "bg", type: "background", paint: { "background-color": "#0b1020" } },
+      { id: "basemap", type: "raster", source: "basemap" },
+    ],
+  };
+}
+
+const VECTOR_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 
 function zoomForKind(kind: string): number {
   if (/country|nation/.test(kind)) return 5;
@@ -163,7 +197,9 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
+  const tileErrorsRef = useRef(0);
   const [ready, setReady] = useState(false);
+  const [tilesStalled, setTilesStalled] = useState(false);
   const [globe, setGlobe] = useState(true);
   const [query, setQuery] = useState(initialQuery ?? "");
   const [searching, setSearching] = useState(false);
@@ -179,9 +215,10 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     }
 
     let cancelled = false;
+    tileErrorsRef.current = 0;
     const map = new maplibregl.Map({
       container,
-      style: RASTER_STYLE,
+      style: rasterStyle("carto"),
       center: [20, 15],
       zoom: 1.6,
       attributionControl: { compact: true },
@@ -215,22 +252,38 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     };
     map.on("style.load", onStyleLoad);
 
-    // Try to upgrade to the vector style (better labels, smoother zoom); the
-    // raster OSM style above is already showing, so failure is harmless.
+    // If the primary tiles keep erroring, quietly fall back to OSM's own
+    // tiles; if those fail too, say so instead of showing a dead globe.
+    map.on("error", (event: ErrorEvent) => {
+      if (cancelled || !("sourceId" in event) || event.sourceId !== "basemap") {
+        return;
+      }
+      tileErrorsRef.current += 1;
+      if (tileErrorsRef.current === 6) {
+        setTilesStalled(true);
+        if (!cancelled) {
+          tileErrorsRef.current = 0;
+          map.setStyle(rasterStyle("osm"));
+        }
+      }
+    });
+
+    // Try to upgrade to the vector style (better labels, smoother zoom) via
+    // the relay chain. The raster map above is already usable, so any
+    // failure here is silent by design.
     (async () => {
+      const result = await relayJson(VECTOR_STYLE_URL, {
+        timeoutMs: 9000,
+      }).catch(() => null);
+      if (!result || !isRelayOk(result) || cancelled || typeof result.data !== "object") {
+        return;
+      }
+      const style = result.data as Record<string, unknown>;
+      style.projection = { type: "globe" };
       try {
-        const response = await fetch(VECTOR_STYLE, { signal: AbortSignal.timeout(5000) });
-        if (!response.ok || cancelled) {
-          return;
-        }
-        const style = (await response.json()) as Record<string, unknown>;
-        if (cancelled) {
-          return;
-        }
-        style.projection = { type: "globe" };
-        map.setStyle(style as maplibregl.StyleSpecification);
+        map.setStyle(style as unknown as StyleSpecification);
       } catch {
-        /* keep raster */
+        /* keep the raster map */
       }
     })();
 
@@ -250,7 +303,7 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     if (!map) {
       return;
     }
-    const onClick = async (event: maplibregl.MapMouseEvent) => {
+    const onClick = async (event: MapMouseEvent) => {
       const { lng, lat } = event.lngLat;
       setInfo(null);
       setInfoLoading(true);
@@ -389,7 +442,7 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
   }, [globe]);
 
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden bg-surface-2">
       <div ref={containerRef} className="absolute inset-0" />
 
       {/* search + controls overlay */}
@@ -453,6 +506,22 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
         {globe ? "Globe" : "Flat"}
       </button>
 
+      {/* tiles struggling: say so, with a retry */}
+      {tilesStalled ? (
+        <button
+          type="button"
+          onClick={() => {
+            setTilesStalled(false);
+            tileErrorsRef.current = 0;
+            mapRef.current?.setStyle(rasterStyle("carto"));
+          }}
+          className="absolute top-36 right-2.5 z-10 flex max-w-[200px] items-start gap-1.5 rounded-xl border border-warning/40 bg-surface/95 px-2.5 py-2 text-left text-[11px] text-muted-foreground shadow-pop backdrop-blur"
+        >
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
+          Map tiles are struggling on this network — tap to retry
+        </button>
+      ) : null}
+
       {/* place card */}
       {infoLoading && !info ? (
         <div className="absolute inset-x-2.5 bottom-3 z-10 flex items-center gap-2 rounded-xl border border-hairline bg-surface/95 px-3 py-2.5 text-[12px] text-muted-foreground shadow-pop backdrop-blur">
@@ -502,7 +571,7 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
         </div>
       ) : null}
 
-      {/* locate pill for discoverability */}
+      {/* usage hint */}
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-[5] flex justify-center">
         <p className="pointer-events-none flex items-center gap-1.5 rounded-full bg-black/45 px-3 py-1 text-[10.5px] text-white/90 backdrop-blur">
           <LocateFixed className="size-3" /> scroll to zoom · tap any spot to know it
