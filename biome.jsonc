@@ -1,60 +1,30 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "extends": [
-    "ultracite/biome/core",
-    "ultracite/biome/next",
-    "ultracite/biome/react"
-  ],
   "formatter": {
+    "enabled": true,
     "indentStyle": "space",
-    "indentWidth": 2
-  },
-  "files": {
-    "includes": [
-      "**/*.ts",
-      "**/*.tsx",
-      "**/*.js",
-      "**/*.jsx",
-      "!node_modules",
-      "!.next",
-      "!ai-sdk",
-      "!components/ui",
-      "!lib/utils.ts",
-      "!hooks/use-mobile.ts"
-    ]
+    "indentWidth": 2,
+    "lineWidth": 90
   },
   "linter": {
+    "enabled": true,
     "rules": {
+      "recommended": true,
       "suspicious": {
         "noExplicitAny": "off",
-        "noUnknownAtRules": "off",
         "noConsole": "off",
         "noBitwiseOperators": "off"
       },
-      "style": {
-        "noMagicNumbers": "off",
-        "noNestedTernary": "off",
-        "useConsistentTypeDefinitions": "off"
-      },
-      "nursery": {
-        "noUnnecessaryConditions": "off",
-        "useSortedClasses": "off"
-      },
-      "complexity": {
-        "noExcessiveCognitiveComplexity": "off",
-        "useSimplifiedLogicExpression": "off"
-      },
-      "a11y": {
-        "noSvgWithoutTitle": "off"
-      },
-      "correctness": {
-        "useUniqueElementIds": "off",
-        "useImageSize": "off"
-      },
-      "performance": {
-        "noBarrelFile": "off",
-        "useTopLevelRegex": "off"
-      }
+      "style": { "noNonNullAssertion": "off" },
+      "a11y": { "noSvgWithoutTitle": "off", "useSemanticElements": "off" },
+      "correctness": { "useUniqueElementIds": "off", "noUnusedVariables": "warn" },
+      "performance": { "noBarrelFile": "off", "useTopLevelRegex": "off" }
     }
+  },
+  "javascript": {
+    "formatter": { "quoteStyle": "double", "semicolons": "always" }
+  },
+  "files": {
+    "includes": ["**/*.ts", "**/*.tsx", "!node_modules", "!.next", "!*.config.ts"]
   }
 }

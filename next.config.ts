@@ -1,20 +1,23 @@
 import type { NextConfig } from "next";
-import { withBotId } from "botid/next/config";
 
 const nextConfig: NextConfig = {
-  cacheComponents: true,
-  images: {
-    remotePatterns: [
+  reactStrictMode: true,
+  poweredByHeader: false,
+  serverExternalPackages: ["exifr"],
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+  },
+  async headers() {
+    return [
       {
-        hostname: "avatar.vercel.sh",
+        source: "/api/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+        ],
       },
-      {
-        protocol: "https",
-        //https://nextjs.org/docs/messages/next-image-unconfigured-host
-        hostname: "*.public.blob.vercel-storage.com",
-      },
-    ],
+    ];
   },
 };
 
-export default withBotId(nextConfig);
+export default nextConfig;
