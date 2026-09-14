@@ -54,6 +54,20 @@ import { cn, formatDuration } from "@/lib/utils";
 
 const STARTERS = [
   {
+    label: "B-roll search",
+    prompt:
+      "Find me licence-free B-roll video of Mumbai local trains for a documentary edit.",
+  },
+  {
+    label: "Image find",
+    prompt: "Find reusable images of Charminar, Hyderabad for a poster.",
+  },
+  {
+    label: "Latest news",
+    prompt:
+      "What is the latest reporting on air quality in Delhi — and is it corroborated?",
+  },
+  {
     label: "Domain posture",
     prompt:
       "Assess example.com: registration age, mail spoofing posture, certificate transparency subdomains and lookalike domains.",

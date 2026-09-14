@@ -194,7 +194,7 @@ export function Composer({
             }
           }}
           rows={1}
-          placeholder="Paste a domain, IP, email, phone, plate, PIN code, hash — or ask a question about one."
+          placeholder="Ask for an image, a clip, the latest news — or paste a domain, IP, email, phone, plate, PIN or hash."
           className="thin-scroll max-h-52 w-full resize-none bg-transparent px-2.5 pt-2 pb-1.5 text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-faint-foreground"
         />
 

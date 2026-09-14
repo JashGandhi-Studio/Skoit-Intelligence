@@ -68,18 +68,22 @@ async function prepareDataDir(): Promise<void> {
   }
 }
 
-export async function readConfig(): Promise<StoredConfig> {
-  if (cache) {
-    return cache;
-  }
+async function loadConfigFile(): Promise<StoredConfig> {
   await prepareDataDir();
   try {
     const raw = await readFile(CONFIG_PATH, "utf8");
     const parsed = JSON.parse(raw) as StoredConfig;
-    cache = { ...EMPTY, ...parsed, keys: parsed.keys ?? {} };
+    return { ...EMPTY, ...parsed, keys: parsed.keys ?? {} };
   } catch {
-    cache = { ...EMPTY };
+    return { ...EMPTY };
   }
+}
+
+export async function readConfig(): Promise<StoredConfig> {
+  if (cache) {
+    return cache;
+  }
+  cache = await loadConfigFile();
   return cache;
 }
 
@@ -177,9 +181,14 @@ export async function keyReport(knownKeys: string[]): Promise<
   });
 }
 
-/** Effective answer settings: defaults folded together with whatever was stored. */
+/**
+ * Effective answer settings: defaults folded together with whatever was stored.
+ * Read straight off disk rather than through the module cache, because settings
+ * changed in the UI must apply to the very next run — including when the agent
+ * route and the settings route happen to hold different module instances.
+ */
 export async function readAnswerPreferences(): Promise<AnswerPreferences> {
-  const config = await readConfig();
+  const config = await loadConfigFile();
   return sanitizePreferences({
     ...DEFAULT_ANSWER_PREFERENCES,
     ...(config.preferences.answer ?? {}),

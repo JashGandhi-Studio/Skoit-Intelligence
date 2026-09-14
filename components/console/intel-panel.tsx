@@ -323,6 +323,14 @@ export function IntelPanel({
           <p className="text-[11.5px] text-muted-foreground">
             {turn.stats.steps} skills · {turn.stats.evidence} findings ·{" "}
             {turn.stats.entities} pivots · {turn.stats.sources} sources
+            {turn.media.length + turn.articles.length > 0 ? (
+              <>
+                {" "}
+                · {turn.media.filter((item) => item.kind === "image").length} image(s) ·{" "}
+                {turn.media.filter((item) => item.kind === "video").length} clip(s) ·{" "}
+                {turn.articles.length} article(s)
+              </>
+            ) : null}
           </p>
         </div>
       ) : null}

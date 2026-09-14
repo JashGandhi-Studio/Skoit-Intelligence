@@ -32,31 +32,42 @@ const RETRIEVAL_PATTERNS: Array<{ kind: RetrievalKind; pattern: RegExp }> = [
   {
     kind: "video",
     pattern:
-      /\b(videos?|clips?|footage|b[\s-]?roll|broll|reels?|timelapse|drone shots?|animation|stock video|video chahiye|video dikhao)\b/i,
+      /\b(videos?|clips?|footage|b[\s-]?roll|broll|reels?|timelapse|drone shots?|animation|stock video|video chahiye|video dikhao)\b|वीडियो|वीडिओ|क्लिप|फुटेज/i,
   },
   {
     kind: "image",
     pattern:
-      /\b(images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|thumbnails?|banners?|logos?|visuals?|stock photos?|stock images?|image chahiye|photo chahiye|dikhao|dikha do|screenshot)\b/i,
+      /\b(images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|thumbnails?|banners?|logos?|visuals?|stock photos?|stock images?|image chahiye|photo chahiye|dikhao|dikha do|screenshot|tasveer|tasvir|tasweer|chitra|chitr)\b|तस्वीर|फोटो|चित्र|तस्वीरें|चित्रों/i,
   },
   {
     kind: "news",
     pattern:
-      /\b(news|latest|headlines?|breaking|khabar|samachar|current affairs|what happened|aaj ka)\b/i,
+      /\b(news|latest|headlines?|breaking|khabar|khabrein|samachar|current affairs|what happened|aaj ka)\b|खबर|समाचार|ताज़ा/i,
   },
   {
     kind: "article",
     pattern:
-      /\b(articles?|blogs?|posts?|essays?|papers?|stud(y|ies)|research|reports?|tutorials?|guides?|documentation|whitepapers?|read (about|up on)|explained)\b/i,
+      /\b(articles?|blogs?|posts?|essays?|papers?|stud(y|ies)|research|reports?|tutorials?|guides?|documentation|whitepapers?|read (about|up on)|explained|lekh|article)\b|लेख|रिपोर्ट/i,
   },
 ];
 
 /** Words that carry no subject once the request phrasing is removed. */
 const REQUEST_NOISE =
-  /\b(please|pls|kindly|hey|hi|hello|ok|okay|so|now|then|can you|could you|would you|i want|i need|i would like|give me|gimme|show me|find me|get me|fetch me|search for|search|look for|look up|pull up|download|free|royalty[\s-]?free|licen[cs]e[\s-]?free|unlimited|no copyright|copyright free|b[\s-]?roll|broll|stock|clips?|footage|videos?|images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|articles?|blogs?|news|latest|headlines?|breaking|about|regarding|related to|for|of|on|some|any|the|a|an|chahiye|dikhao|dikha|do|de|dedo|la|bhej)\b/gi;
+  /\b(please|pls|kindly|hey|hi|hello|ok|okay|so|now|then|can you|could you|would you|i want|i need|i would like|give me|gimme|show me|find me|get me|fetch me|search for|search|look for|look up|pull up|download|free|royalty[\s-]?free|licen[cs]e[\s-]?free|unlimited|no copyright|copyright free|b[\s-]?roll|broll|stock|clips?|footage|videos?|images?|photos?|pictures?|pics?|wallpapers?|posters?|illustrations?|graphics?|articles?|blogs?|news|latest|headlines?|breaking|exhaustive|sweep|everything|about|regarding|related to|for|of|on|some|any|the|a|an|chahiye|chaiye|dikhao|dikha|do|de|dedo|la|bhej|mujhe|mujhko|batao|bata|dekhna|dekhni|chahta|chahti|kuch|koi|bare|baare|mein|ki|ka|ke|hai|hain|kya|liye|wala|wali|aap|aapko|sakte|sakta|sakti|ho|hun|hu|kar|karke|karo)\b/gi;
+
+/**
+ * Devanagari request words. JS \b does not treat Devanagari as word characters,
+ * so these are stripped without word boundaries, longest first.
+ */
+const DEVANAGARI_NOISE =
+  /(के बारे में|बारे में|दिखाओ|दिखाइए|दिखा दो|चाहिए|चाहिये|कीजिए|मुझे|तस्वीरें|तस्वीर|फ़ोटो|फोटो|चित्रों|चित्र|वीडियो|वीडिओ|बी-रोल|बीरोल|फुटेज|क्लिप|खबरें|खबर|समाचार|ताज़ा|लेख|रिपोर्ट|अच्छा|अच्छी|कोई|कुछ|की|का|के|पर|में|और|है|हैं)/g;
 
 export function cleanTopic(message: string): string {
   const stripped = message
+    .replace(DEVANAGARI_NOISE, " ")
+    // The composer's sweep switch appends a marker to the prompt; it is a mode
+    // instruction, not part of the subject being searched.
+    .replace(/\((?:full|deep)\s+sweep\)/gi, " ")
     .replace(REQUEST_NOISE, " ")
     .replace(/[?!.]+$/g, " ")
     .replace(/\s+/g, " ")
@@ -465,9 +476,11 @@ export function buildPlan(request: AgentRequest): Plan {
     }
   }
 
-  if (wantsDeep && hardTargets.length > 0) {
+  // Background reporting: standard mode adds it around a target, deep always does.
+  // The news toggle applies here because the analyst did not explicitly ask for it.
+  if ((wantsDeep || focus === "standard") && hardTargets.length > 0) {
     const reporting = getSkill("news-search");
-    if (reporting) {
+    if (reporting && (wantsDeep || preferences.media.news)) {
       addStep(reporting, retrievalTarget(hardTargets[0].value));
     }
   }

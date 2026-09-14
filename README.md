@@ -1,19 +1,19 @@
-# INDUS — an OSINT analyst console
+# SkOiT — an OSINT analyst console
 
 A working open-source-intelligence workbench that runs on your own machine. It collects from real
 public sources, shows exactly what it could **not** verify, scores the gaps as well as the findings,
 and saves every run as a case file you own.
 
-No accounts. No cloud database. No telemetry. 29 skills — 18 live against public endpoints, 11 offline
+No accounts. No cloud database. No telemetry. 33 skills — 22 live against public endpoints, 11 offline
 validators — and one rule enforced throughout: **nothing is asserted that was not collected.**
 
 ```
  ┌──────────────┬────────────────────────────────────────────┬─────────────────────┐
  │ Case files   │ Plan → skill runs → evidence → briefing    │ Findings            │
- │ search       │                                            │ Pivots              │
- │ pin          │ Ask in Hinglish or English, attach a photo │ Sources             │
- │ export       │ or a PDF, dictate the question             │ Risk read           │
- │ import       │                                            │ Coverage            │
+ │ search       │                                            │ Media & reporting   │
+ │ pin          │ Ask in Hinglish or English, attach a photo │ Pivots              │
+ │ export       │ or a PDF, dictate the question             │ Sources             │
+ │ import       │                                            │ Risk read           │
  └──────────────┴────────────────────────────────────────────┴─────────────────────┘
 ```
 
@@ -57,6 +57,13 @@ refusal to infer caste, religion or community)
 `vehicle-registration` (state, RTO zone, series decode — plus a plain statement that owner data is not
 publicly obtainable)
 
+**Retrieval** — `image-search` (Wikimedia Commons, Openverse, NASA, plus Pexels/Pixabay/Unsplash when
+keyed) · `video-search` (Commons video, NASA assets, Internet Archive footage, stock libraries) ·
+`news-search` (GDELT news index, Hacker News, Wikipedia — each result corroborated across independent
+domains before it is called anything more than single-source) · `image-provenance` (hashes an image
+from a URL, matches it against Commons by SHA-1, shows perceptual hashes and names the keyed reverse
+searches it could not run instead of guessing)
+
 **Knowledge** — `text-intelligence` (entities, dates, indicators, PII flags in pasted text) ·
 `coordinate-intelligence` (DMS, geodesic distance to a bundled city index) · `web-search` ·
 `sanctions-screening` (OpenSanctions)
@@ -68,17 +75,36 @@ keyed) · `reference-lab` (JWT claims, ObjectId/UUIDv7 timestamps, Unix time, ba
 (permutations, then **DNS-verified** so you see which lookalikes actually resolve) · `dns-posture`
 (SPF, DMARC, DKIM selectors, CAA, security.txt)
 
+## Images, articles, video and news
+
+Ask for a picture, a clip or a story and that is what comes back — a gallery of images with the licence
+each source states, downloadable video and B-roll, and reporting with its corroboration counted. Ask for
+one thing and one thing returns; ask for a domain and the full sweep runs. Depth is yours to set.
+
+- **Focused** answers exactly what was asked. **Standard** adds background. **Deep** sweeps every
+  relevant skill, documents included. Set it in Settings → Answers.
+- Media toggles decide what is searched by default; **an explicit ask always wins** — switching video
+  off does not refuse a video request.
+- The licence filter defaults to items cleared for reuse. Items with no stated licence are still shown
+  when you ask for any licence, flagged, never quietly presented as free.
+- Every result carries its source library, author, dimensions/duration where the source gives them, a
+  direct download link, and a link to the source page. Nothing is rehosted or proxied — the console
+  never becomes a mirror of other people's media.
+- News is corroborated by clustering headlines across independent domains: you see `+N independent`
+  or `single source`, and syndicated copies are labelled as copies.
+
 ## The honesty model
 
 This is the part that matters, and it is structural rather than a prompt instruction.
 
 - Every skill returns `{ status, summary, evidence[], entities[], sources[], error? }`. Unreachable,
   blocked, partial and error are first-class outcomes that appear in the coverage table of every
-  briefing — not swallowed.
+  briefing — not swallowed. A media search that could not reach its sources says which ones failed.
 - The risk score is arithmetic. Critical/high/medium findings add weight; **unreachable sources and
   unconsulted keyed sources add weight too**, capped, because a blind spot is not an all-clear. A run
   that collected nothing says the band reflects verifiability, not a finding against the target.
-- A skill that needs a key reports `requires_key` with instructions. It never returns a fake "no match".
+- A skill that needs a key reports `requires_key` with instructions. It never returns a fake "no match",
+  and image search names the libraries it could not query.
 - When a model is configured it receives the evidence JSON and is instructed to cite collected sources
   and to never add facts of its own; an empty or failed model response falls back to the deterministic
   write-up with a warning. With no model configured, briefings are deterministic and fully functional.
@@ -100,24 +126,30 @@ speech recogniser (en-IN, hi-IN, mr-IN, ta-IN, te-IN, bn-IN, gu-IN, kn-IN, ml-IN
 ## Keys and models
 
 Everything is optional. Keys can be set in `.env` or entered in Settings → Keys, where they are written
-to `~/.indus/config.json` with owner-only permissions and never sent back to the browser (the API
+to `~/.skoit/config.json` with owner-only permissions and never sent back to the browser (the API
 reports presence only).
 
 | Purpose | Variables |
 | --- | --- |
 | Briefing models | `SARVAM_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `COMPATIBLE_BASE_URL` (local Ollama/LM Studio, loopback only) |
 | Keyed sources | `HIBP_API_KEY`, `SEARCH_API_KEY`, `OPENSANCTIONS_API_KEY`, `VIRUSTOTAL_API_KEY` |
+| Keyed media libraries | `PEXELS_API_KEY`, `PIXABAY_API_KEY`, `UNSPLASH_ACCESS_KEY` |
 
 Images support Sarvam (`sarvam-m`), OpenAI, Anthropic, Google Gemini and any OpenAI-compatible local
-server; `INDUS_MODEL_PROVIDER` forces a choice and `<PROVIDER>_MODEL` overrides the default. Model calls
-are plain `fetch` — no model SDK is bundled.
+server; `SKOIT_MODEL_PROVIDER` forces a choice and `<PROVIDER>_MODEL` overrides the default. Model calls
+are plain `fetch` — no model SDK is bundled. Answer settings live under `~/.skoit/config.json` too, so
+the server pass and the browser pass plan from identical rules.
 
 ## Case files
 
-A case holds every prompt, plan, skill outcome, finding, pivot, source, risk history and briefing.
-Cases are stored server-side in `~/.indus/cases.json` and mirrored in the browser (`localStorage`) for
-instant reads, searchable by prompt text, pinnable, and exportable as JSON (re-importable) or as a
-markdown report for printing or PDF.
+A case holds every prompt, plan, skill outcome, finding, pivot, source, risk history, briefing, and the
+images/clips/reporting that were returned — with their licences. Cases are stored server-side in
+`~/.skoit/cases.json` and mirrored in the browser (`localStorage`) for instant reads, searchable by
+prompt text, pinnable, and exportable as JSON (re-importable) or as a markdown report that lists the
+files found for printing or PDF.
+
+Data written under the old `~/.indus` directory and the old browser storage key is migrated on first
+run.
 
 ## Legal and ethical scope
 
@@ -125,8 +157,9 @@ This tool queries public registries, transparency logs and public APIs. It does 
 authentication, scrape private data, or emit identity claims it cannot verify. It deliberately refuses
 to infer caste, religion or community from names, and it states plainly which data — subscriber
 identity, vehicle ownership, unmasked government identifiers — is only obtainable through lawful
-authority. Using a tool like this to profile, harass or surveil individuals may be unlawful; under the
-DPDP Act 2023 and the IT Act, that responsibility is yours.
+authority. Media stays where it was published: licences are quoted, attribution is shown, and using a
+tool like this to profile, harass or surveil individuals may be unlawful. Under the DPDP Act 2023 and
+the IT Act, that responsibility is yours.
 
 ## Stack
 
