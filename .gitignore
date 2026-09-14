@@ -42,3 +42,10 @@ yarn-error.log*
 /playwright-report/
 /blob-report/
 /playwright/*
+
+# local SkOiT data (also lives in ~/.skoit by default)
+.skoit/
+.indus/
+
+# typescript incremental build cache
+*.tsbuildinfo
