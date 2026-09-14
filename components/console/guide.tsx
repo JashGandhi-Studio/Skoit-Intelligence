@@ -245,7 +245,7 @@ const SECTIONS: Array<{
 
 export function Guide() {
   return (
-    <div className="space-y-5">
+    <div className="stagger space-y-5">
       <p className="rounded-xl border border-primary/25 bg-primary-soft/60 px-3.5 py-3 text-[12.5px] leading-relaxed text-foreground">
         <strong>Ask like you'd ask a person.</strong> SkOiT plans which sources to run for
         every request, shows what it could and could not verify, and opens everything —

@@ -111,7 +111,7 @@ export function QuickCards({ turn }: { turn: TurnView }) {
                   ok ? `${card.label} copied` : "Clipboard blocked",
                 );
               }}
-              className="group flex items-center gap-2.5 rounded-xl border border-hairline bg-surface px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary-soft/40"
+              className="group flex items-center gap-2.5 rounded-xl border border-hairline bg-surface px-3 py-2 text-left transition-all hover:-translate-y-px hover:border-primary/40 hover:bg-primary-soft/40 active:scale-[0.985]"
             >
               <Icon className="size-4 shrink-0 text-primary" />
               <span className="min-w-0 flex-1">

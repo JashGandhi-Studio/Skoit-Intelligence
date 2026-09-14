@@ -182,13 +182,13 @@ function DropZone({
           }
         }}
         className={cn(
-          "grid w-full place-items-center gap-1.5 rounded-xl border border-dashed px-4 py-6 text-center transition-colors",
+          "group grid w-full place-items-center gap-1.5 rounded-xl border border-dashed px-4 py-6 text-center transition-all duration-200",
           dragging
-            ? "border-primary/60 bg-primary-soft"
-            : "border-hairline-strong bg-surface-2/40 hover:bg-surface-2",
+            ? "dropzone-live scale-[1.01] border-primary/70 bg-primary-soft"
+            : "border-hairline-strong bg-surface-2/40 hover:border-primary/45 hover:bg-surface-2",
         )}
       >
-        <FilePlus2 className="size-5 text-primary" />
+        <FilePlus2 className="size-5 text-primary transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:scale-110" />
         <span className="text-[13px] font-medium text-foreground">
           Tap to choose {multiple ? "files" : "a file"} — or drop{" "}
           {multiple ? "them" : "it"} here
@@ -214,7 +214,7 @@ function DropZone({
           {files.map((file, index) => (
             <li
               key={`${file.name}-${file.size}-${file.lastModified}`}
-              className="flex items-center gap-2 rounded-lg border border-hairline bg-surface px-2.5 py-1.5"
+              className="animate-fade flex items-center gap-2 rounded-lg border border-hairline bg-surface px-2.5 py-1.5 transition-colors hover:border-primary/30 hover:bg-surface-2/70"
             >
               {multiple ? (
                 <span className="font-mono text-[10.5px] text-faint-foreground">
@@ -260,7 +260,7 @@ function RunButton({
       size="md"
       disabled={running || disabled}
       onClick={onClick}
-      className="w-full sm:w-auto"
+      className="w-full shadow-raise transition-all hover:-translate-y-px hover:shadow-pop sm:w-auto"
     >
       {running ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}
       {running ? "Working…" : children}
@@ -365,7 +365,7 @@ export function DocumentWorkshop() {
 
       {/* ------------------------------------------------ text → pdf ---- */}
       {tool === "create" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           <Input
             value={docTitle}
             onChange={(event) => setDocTitle(event.target.value)}
@@ -416,7 +416,7 @@ export function DocumentWorkshop() {
 
       {/* ----------------------------------------------- images → pdf ---- */}
       {tool === "images" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           <DropZone
             accept="image/jpeg,image/png,.jpg,.jpeg,.png"
             multiple
@@ -461,7 +461,7 @@ export function DocumentWorkshop() {
 
       {/* ----------------------------------------------------- merge ---- */}
       {tool === "merge" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           <DropZone
             accept="application/pdf,.pdf"
             multiple
@@ -494,7 +494,7 @@ export function DocumentWorkshop() {
 
       {/* ----------------------------------------------------- split ---- */}
       {tool === "split" && singleFile ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           <DropZone
             accept="application/pdf,.pdf"
             multiple={false}
@@ -542,7 +542,7 @@ export function DocumentWorkshop() {
 
       {/* -------------------------------------------------- organize ---- */}
       {tool === "organize" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           {singleFile ? (
             <>
               <DropZone
@@ -639,7 +639,7 @@ export function DocumentWorkshop() {
 
       {/* ------------------------------------------------------- n-up ---- */}
       {tool === "nup" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           {singleFile ? (
             <>
               <DropZone
@@ -700,7 +700,7 @@ export function DocumentWorkshop() {
 
       {/* --------------------------------------------------------- a4 ---- */}
       {tool === "a4" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           {singleFile ? (
             <>
               <DropZone
@@ -744,7 +744,7 @@ export function DocumentWorkshop() {
 
       {/* ------------------------------------------------------- cover ---- */}
       {tool === "cover" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           {singleFile ? (
             <>
               <DropZone
@@ -808,7 +808,7 @@ export function DocumentWorkshop() {
 
       {/* -------------------------------------------------------- meta ---- */}
       {tool === "meta" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           {singleFile ? (
             <>
               <DropZone
@@ -872,7 +872,7 @@ export function DocumentWorkshop() {
 
       {/* ------------------------------------------------- watermark ---- */}
       {tool === "watermark" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           {singleFile ? (
             <>
               <DropZone
@@ -922,7 +922,7 @@ export function DocumentWorkshop() {
 
       {/* --------------------------------------------- page numbers ---- */}
       {tool === "numbers" ? (
-        <div className="space-y-2.5">
+        <div className="studio-in space-y-2.5">
           {singleFile ? (
             <>
               <DropZone

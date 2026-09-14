@@ -232,7 +232,7 @@ export function QrStudio() {
                 type="button"
                 onClick={() => setKind(entry.id)}
                 className={cn(
-                  "rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-colors",
+                  "rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-all hover:-translate-y-px active:scale-95",
                   kind === entry.id
                     ? "border-primary/50 bg-primary-soft text-primary-strong"
                     : "border-hairline text-muted-foreground hover:bg-surface-2",
@@ -418,7 +418,7 @@ export function QrStudio() {
                   type="button"
                   onClick={() => patch({ moduleStyle: style.id })}
                   className={cn(
-                    "rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors",
+                    "rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium transition-all hover:-translate-y-px active:scale-95",
                     design.moduleStyle === style.id
                       ? "border-primary/50 bg-primary-soft text-primary-strong"
                       : "border-hairline text-muted-foreground hover:bg-surface-2",
@@ -440,7 +440,7 @@ export function QrStudio() {
                   type="button"
                   onClick={() => patch({ finderStyle: style.id })}
                   className={cn(
-                    "rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors",
+                    "rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium transition-all hover:-translate-y-px active:scale-95",
                     design.finderStyle === style.id
                       ? "border-primary/50 bg-primary-soft text-primary-strong"
                       : "border-hairline text-muted-foreground hover:bg-surface-2",
@@ -543,10 +543,10 @@ export function QrStudio() {
 
       {/* ---------------- preview ---------------- */}
       <div className="space-y-3 lg:sticky lg:top-0">
-        <div className="grid place-items-center rounded-2xl border border-hairline bg-surface-2/50 p-4">
+        <div className="hover-lift studio-in grid place-items-center rounded-2xl border border-hairline bg-surface-2/60 p-4">
           <canvas
             ref={canvasRef}
-            className="h-auto w-full max-w-60 rounded-lg shadow-raise"
+            className="h-auto w-full max-w-60 rounded-lg shadow-raise transition-transform duration-300 hover:scale-[1.03]"
             aria-label="QR code preview"
           />
         </div>

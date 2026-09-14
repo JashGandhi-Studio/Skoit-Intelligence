@@ -1020,7 +1020,7 @@ export function Console() {
                   <p className="mb-2 text-[11px] font-medium tracking-wide text-faint-foreground uppercase">
                     Try one of these
                   </p>
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="stagger grid gap-2 sm:grid-cols-2">
                     {STARTERS.map((starter) => (
                       <button
                         key={starter.label}
