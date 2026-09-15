@@ -33,11 +33,11 @@ const SECTIONS: Array<{
 }> = [
   {
     icon: Music2,
-    title: "Songs & music (JioSaavn)",
+    title: "Songs & music",
     items: [
       {
         say: "Play the song Kesariya",
-        note: "Full song from JioSaavn — plays right here, download button included. Ask for that exact song: you get that song, not a pile of lookalikes.",
+        note: "Full song plays right here, with a download button where available. Ask for that exact song: you get that song, not a pile of lookalikes.",
       },
       {
         say: "Tum Hi Ho by Arijit Singh",
@@ -295,7 +295,7 @@ export function Guide() {
       <p className="border-t border-hairline pt-3 text-[10.5px] leading-relaxed text-faint-foreground">
         No accounts, no telemetry: cases, keys and preferences stay on this machine.
         Sources are free public ones. The briefing is always written from the collected
-        evidence: with no key the built-in analyst writes it, and SkOiT's free AI (no
+        evidence: with no key the built-in analyst writes it, and the SkOiT Model (no
         signup, no key) can reword it with every fact locked — the original is one tap
         away. A personal model key in Settings upgrades the writing further.
       </p>

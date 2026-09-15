@@ -174,8 +174,8 @@ export function capabilityAnswer(
   return [
     opener,
     "",
-    "- **Songs** — “play Ae Dil Hai Mushkil” — the full song from JioSaavn, played and downloadable in-app",
-    "- **Videos** — “videos of Chandrayaan launch” — YouTube, playable right here",
+    "- **Songs** — “play Ae Dil Hai Mushkil” — the full track, played and downloadable in-app",
+    "- **Videos** — “videos of Chandrayaan launch” — playable right here, with a download button",
     "- **News** — “latest news” or “Japan news headlines” — the freshest reporting for your country, readable inside the console",
     "- **Images** — “find photos of Charminar at sunrise” — licence-carrying sources, direct downloads",
     "- **Exam papers** — “ICSE class 10 physics specimen paper” — direct PDFs, open and download in-app",
@@ -756,17 +756,21 @@ RETRIEVAL RESULTS (files and reporting actually returned by the sources)
 ${retrievalBlock(bundle)}`;
 }
 
-export const RETRIEVAL_INSTRUCTIONS = `You are the writing layer of a search console. The user asked for something to be
-found — a picture, a song, footage or news. Answer with what was actually returned, in the same register the
-question was asked in, and nothing else.
+export const RETRIEVAL_INSTRUCTIONS = `You are the writing layer of the SkOiT console (SkOiT Intelligence). The user asked for
+something to be found — a picture, a song, footage or news. Answer with what was actually returned, in the
+same register the question was asked in, and nothing else.
 
 Hard rules:
 1. Never name an item that is not in the RETRIEVAL RESULTS block.
-2. Two to five short lines. No headings, no bullet lists longer than the results, no risk talk, no coverage table.
+2. Two to five short lines. No headings, no sections, no bullet lists, no risk talk, no coverage table.
 3. State the count found and, where it matters, the licence that applies. Say plainly when a result is only a
    30-second preview rather than a downloadable file.
-4. If nothing was returned, say so in one line and name which library failed — never soften it into a maybe.
-5. No filler, no marketing voice, no emoji.
+4. NEVER list the results. The results are already shown in the gallery below the answer, so naming every
+   item and pasting every link is wrong. Mention at most ONE or TWO representative items by name, and include
+   at most TWO links in the whole answer. Do not enumerate a numbered list of URLs. Do not add a "Where this
+   came from" or "Open web results" section — just one short closing line naming the engine.
+5. If nothing was returned, say so in one line and name which library failed — never soften it into a maybe.
+6. No filler, no marketing voice, no emoji, no source-brand names beyond the engine itself.
 
 Plain prose only.`;
 
@@ -791,7 +795,10 @@ Output markdown with these sections, in this order, and omit any section with no
 ### What we found            (bulleted; each line starts with the thing found, then what it is, then [source])
 ### What it means            (only the points that change how the reader should act; plain consequences)
 ### What we could not check  (which sources did not answer, and what that does and does not imply)
-### Where this came from     (name the engines used + at most 2 concrete sources; never dump every link — the full list lives in "Cited sources")
+### Where this came from     (ONE line naming the engines used — for example "Searched the open web
+                              (DuckDuckGo / Bing) and the music libraries". At most ONE concrete source link.
+                              Never list every result: the results are already shown in the gallery below the
+                              answer, and a wall of URLs is exactly what the analyst does not want here.)
 
 Match length to the question. A request for an image, a song or a news item is answered in a few lines —
 name what was found, where it came from and its licence, and mark single-source reporting as unconfirmed.`;

@@ -11,11 +11,11 @@ import {
 import type { RiskAssessment } from "@/lib/types";
 
 /**
- * The optional free model.
+ * The optional SkOiT Model (SkOiT Intelligence).
  *
- * When the analyst has no API key of their own, this asks Puter.js — a free,
- * keyless model endpoint that runs from the browser — to write the briefing over
- * the evidence this console already collected. Three rules hold:
+ * When the analyst has no API key of their own, this runs the SkOiT Model —
+ * the keyless model endpoint that runs from the browser — to write the briefing
+ * over the evidence this console already collected. Three rules hold:
  *
  *   1. It is opt-in. `ai: "off"` never loads the script at all.
  *   2. Only collected evidence and source labels are sent, never a question
@@ -114,7 +114,7 @@ export interface FreeModelResult {
   error?: string;
 }
 
-/** Ask the free browser model to write up what was actually collected. */
+/** Ask the SkOiT Model to write up what was actually collected. */
 export async function writeWithFreeModel(
   bundle: AnalysisBundle,
   risk: RiskAssessment,
@@ -139,7 +139,7 @@ export async function writeWithFreeModel(
     if (!puter?.ai?.chat) {
       return {
         error:
-          "the free model script (js.puter.com) could not be loaded from this browser — it may be blocked by a network policy or an extension",
+          "the SkOiT Model could not be loaded from this browser — it may be blocked by a network policy or an extension",
       };
     }
 
@@ -155,17 +155,17 @@ export async function writeWithFreeModel(
         setTimeout(
           () =>
             reject(
-              new Error("the free model took too long — kept the built-in briefing"),
+              new Error("the SkOiT Model took too long — kept the built-in briefing"),
             ),
           12_000,
         ),
       ),
     ]);
     const text = textOf(response);
-    return text ? { text } : { error: "the free model returned nothing usable" };
+    return text ? { text } : { error: "the SkOiT Model returned nothing usable" };
   } catch (error) {
     return {
-      error: error instanceof Error ? error.message : "the free model call failed",
+      error: error instanceof Error ? error.message : "the SkOiT Model call failed",
     };
   }
 }

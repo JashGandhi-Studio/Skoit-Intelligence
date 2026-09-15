@@ -44,6 +44,11 @@ interface Relay {
   textPreferred?: boolean;
 }
 
+/**
+ * Every public CORS relay the console knows, raced at once — a dead relay no
+ * longer adds its full timeout to a fetch, the first live one wins. The list
+ * is deliberately broad: on any given network one or two of these will answer.
+ */
 const RELAYS: Relay[] = [
   {
     label: "allorigins",
@@ -58,15 +63,23 @@ const RELAYS: Relay[] = [
     wrap: (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
   },
   {
-    label: "thingproxy",
+    label: "corsproxy-org",
+    wrap: (u) => `https://corsproxy.org/?url=${encodeURIComponent(u)}`,
+  },
+  {
+    label: "isomorphic",
+    wrap: (u) => `https://cors.isomorphic-git.org/${u}`,
+  },
+  {
+    label: "allorigins-json",
     wrap: (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
     textPreferred: true,
   },
 ];
 
-const DIRECT_TIMEOUT_MS = 5_000;
-const RELAY_TIMEOUT_MS = 12_000;
-const RELAY_RACE_STAGGER_MS = 350;
+const DIRECT_TIMEOUT_MS = 4_000;
+const RELAY_TIMEOUT_MS = 9_000;
+const RELAY_RACE_STAGGER_MS = 250;
 
 /**
  * True when this module runs inside Node (the API route) rather than the

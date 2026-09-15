@@ -212,6 +212,44 @@
     display: none;
   }
 
+  .start-globe {
+    position: relative;
+    width: 220px;
+    height: 220px;
+    margin: 0 auto 1.25rem;
+    border-radius: 50%;
+    overflow: hidden;
+    background: radial-gradient(circle at 35% 28%, #39a8e8 0%, #1761a6 42%, #06244b 78%, #031329 100%);
+    box-shadow: 0 0 0 9px rgba(26, 157, 212, .16), 0 0 34px rgba(40, 170, 230, .36), inset -25px -18px 45px rgba(0,0,0,.55);
+    animation: start-globe-float 5s ease-in-out infinite;
+  }
+  .start-globe::before, .start-globe::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: repeating-linear-gradient(90deg, transparent 0 38px, rgba(190,235,255,.24) 39px 40px, transparent 41px 76px);
+    background-size: 190% 100%;
+    background-position: 0 0;
+    transform: perspective(250px) rotateY(-18deg);
+    opacity: .62;
+    animation: start-globe-meridians 6s linear infinite;
+  }
+  .start-globe::after {
+    background: repeating-linear-gradient(0deg, transparent 0 39px, rgba(190,235,255,.24) 40px 41px, transparent 42px 78px);
+    background-size: 100% 180%;
+    transform: none;
+    animation: none;
+  }
+  .start-globe__land { position: absolute; z-index: 1; background: #3fa26e; filter: blur(.3px); opacity: .9; animation: start-globe-land-spin 6s linear infinite; }
+  .start-globe__land--one { width: 86px; height: 55px; left: 18px; top: 25px; border-radius: 58% 42% 55% 45%; }
+  .start-globe__land--two { width: 57px; height: 91px; left: 91px; top: 91px; border-radius: 48% 52% 45% 55%; animation-delay: -2s; }
+  .start-globe__land--three { width: 36px; height: 57px; right: 8px; top: 57px; border-radius: 55% 45% 50% 50%; animation-delay: -4s; }
+  @keyframes start-globe-float { 0%,100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-7px) rotate(1deg); } }
+  @keyframes start-globe-meridians { from { background-position: 0 0; } to { background-position: 190% 0; } }
+  @keyframes start-globe-land-spin { 0% { transform: translateX(-58px) scaleX(.72); opacity: .35; } 25% { transform: translateX(-18px) scaleX(1); opacity: .9; } 50% { transform: translateX(34px) scaleX(.72); opacity: .5; } 75% { transform: translateX(64px) scaleX(.38); opacity: .18; } 100% { transform: translateX(-58px) scaleX(.72); opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .start-globe { animation: none; } }
+
   .thin-scroll {
     scrollbar-width: thin;
     scrollbar-color: var(--hairline-strong) transparent;

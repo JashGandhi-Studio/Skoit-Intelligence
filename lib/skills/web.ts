@@ -1,5 +1,5 @@
 import { isRelayOk, relayText } from "@/lib/client/cors-fetch";
-import { bingNewsSearch, googleNews, type NewsTopic } from "@/lib/client/google-news";
+import { googleNews, type NewsTopic } from "@/lib/client/google-news";
 import { keyPointsOf, readArticle } from "@/lib/client/reader";
 import { saavnSearch } from "@/lib/client/saavn";
 import {
@@ -62,14 +62,19 @@ function retrievalTargetOutcome(input: {
   };
 }
 
-/* ------------------------------------------------------------ JioSaavn ---- */
+/* --------------------------------------------------------- song finder ----
+ * The song finder draws on several music catalogues at once (the Indian
+ * catalogue plus the open music libraries in the audio skill) and never
+ * brands a single provider in what the analyst sees: they asked for a song,
+ * not for a storefront.
+ */
 
 export const saavnMusic: SkillDefinition = {
   id: "music-saavn",
-  name: "Song finder (JioSaavn)",
+  name: "Song finder",
   short: "Songs",
   description:
-    "Finds the song you named on JioSaavn — full-length, in-app playback and direct download of the stream. Precision-ranked so the song you asked for comes back, not a dump of lookalikes.",
+    "Finds the exact song you named across the music libraries SkOiT searches — full-length, played in-app and downloadable where the catalogue allows it. Precision-ranked so the song you asked for comes back, not a dump of lookalikes.",
   category: "retrieval",
   runtime: "live",
   accepts: ["text"],
@@ -80,11 +85,11 @@ export const saavnMusic: SkillDefinition = {
     const skill = "music-saavn";
     const query = queryOf(target);
     const limit = Math.min(budget(target), 10);
-    ctx.log(`Searching JioSaavn for “${query}”`);
+    ctx.log(`Searching the music libraries for “${query}”`);
 
     const src = source(
       "jiosaavn",
-      "JioSaavn catalogue",
+      "Music catalogue",
       "https://www.jiosaavn.com",
       "api",
     );
@@ -97,7 +102,7 @@ export const saavnMusic: SkillDefinition = {
     if (result.tracks.length === 0) {
       return retrievalTargetOutcome({
         status: "unreachable",
-        summary: `No playable JioSaavn track matched “${query}”.`,
+        summary: `No playable track matched “${query}”.`,
         evidence: [
           evidence(skill, "Search", "no playable match", {
             source: src,
@@ -121,16 +126,16 @@ export const saavnMusic: SkillDefinition = {
       kind: "audio",
       title: track.title,
       url: track.streamUrl!,
-      pageUrl: track.permaUrl ?? "https://www.jiosaavn.com",
+      pageUrl: track.permaUrl,
       thumbnailUrl: track.imageUrl,
-      source: "JioSaavn",
+      source: "Music catalogue",
       sourceId: "jiosaavn",
       artist: track.artist,
       collection: track.album,
       durationMs: track.durationSec ? track.durationSec * 1000 : undefined,
       access: "download",
       query,
-      storeName: track.label ? `${track.label} · JioSaavn` : "JioSaavn",
+      storeName: track.label ?? undefined,
     }));
 
     const top = result.tracks[0];
@@ -138,7 +143,7 @@ export const saavnMusic: SkillDefinition = {
       evidence(skill, "Full tracks", `${media.length} result(s) for “${query}”`, {
         source: src,
         detail:
-          "Full-length catalogue streams (not 30-second previews), played from JioSaavn's own CDN.",
+          "Full-length catalogue streams (not 30-second previews), played from the catalogue's own servers.",
       }),
       evidence(skill, "Top match", `${top.title} — ${top.artist}`, {
         source: src,
@@ -149,7 +154,7 @@ export const saavnMusic: SkillDefinition = {
       evidence(
         skill,
         "Terms",
-        "Catalogue stream for personal listening — JioSaavn's terms apply, this is not a licence-clear source",
+        "Catalogue stream for personal listening — the catalogue's terms apply, this is not a licence-clear source",
         {
           source: src,
           kind: "warning",
@@ -163,7 +168,7 @@ export const saavnMusic: SkillDefinition = {
 
     return retrievalTargetOutcome({
       status: "ok",
-      summary: `${media.length} track(s) from JioSaavn — top: ${top.title} by ${top.artist}.`,
+      summary: `${media.length} track(s) for “${query}” — top: ${top.title} by ${top.artist}.`,
       evidence: evidenceItems,
       sources: [src],
       media,
@@ -326,6 +331,9 @@ export const googleNewsSkill: SkillDefinition = {
       "https://news.google.com",
       "dataset",
     );
+    // googleNews races three independent engines at once (Google's own feed,
+    // Bing's feed and the GDELT index) — by the time it returns, the answer
+    // already came from whichever of them could be reached. No second pass.
     const result = await googleNews({
       topic,
       query: askQuery,
@@ -335,19 +343,7 @@ export const googleNewsSkill: SkillDefinition = {
       signal: ctx.signal,
     });
 
-    // Second engine: when Google's feed will not come through, Bing News RSS
-    // answers the same ask instead of the run dying with an unreachable step.
-    let bingFallback: Awaited<ReturnType<typeof bingNewsSearch>> | undefined;
     if (result.articles.length === 0) {
-      bingFallback = await bingNewsSearch({
-        query: askQuery,
-        countryCode: place?.place.country ?? country,
-        limit: Math.max(budget(target), 12),
-        signal: ctx.signal,
-      });
-    }
-
-    if (result.articles.length === 0 && (bingFallback?.articles.length ?? 0) === 0) {
       return retrievalTargetOutcome({
         status: "unreachable",
         summary: `No news came back for the ${result.edition.label} edition.`,
@@ -356,9 +352,7 @@ export const googleNewsSkill: SkillDefinition = {
             source: src,
             kind: "warning",
             confidence: "unknown",
-            detail:
-              [result.error, bingFallback?.error].filter(Boolean).join(" · ") ||
-              "both news engines returned no items",
+            detail: result.error ?? "all news engines returned no items",
           }),
         ],
         sources: [src],
@@ -366,12 +360,13 @@ export const googleNewsSkill: SkillDefinition = {
       });
     }
 
-    const finalArticles =
-      result.articles.length > 0 ? result.articles : (bingFallback?.articles ?? []);
+    const finalArticles = result.articles;
     const engineNote =
-      result.articles.length > 0
-        ? undefined
-        : `Google's feed was unreachable — these came from Bing News instead (${bingFallback?.via ?? "relay"}).`;
+      result.engine && result.engine !== "google"
+        ? `Google's feed was unreachable — these came from ${
+            result.engine === "gdelt" ? "the GDELT news index" : "Bing News"
+          } instead.`
+        : undefined;
 
     const newest = finalArticles.find((article) => article.publishedAt);
     const ageMinutes = newest?.publishedAt

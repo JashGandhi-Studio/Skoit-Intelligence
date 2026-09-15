@@ -283,10 +283,14 @@ export function CaseSidebar({
                     <Button
                       variant="ghost"
                       size="iconSm"
-                      onClick={() => {
-                        onDelete(caseFile.id);
-                        toast.success("Case deleted");
-                      }}
+                        onClick={() => {
+                          const confirmed = window.confirm(
+                            `Delete “${caseFile.title}”? This removes the case and all saved searches from this device.`,
+                          );
+                          if (!confirmed) return;
+                          onDelete(caseFile.id);
+                          toast.success("Case deleted");
+                        }}
                       aria-label="Delete case"
                     >
                       <Trash2 />

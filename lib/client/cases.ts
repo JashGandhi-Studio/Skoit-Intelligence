@@ -298,6 +298,8 @@ export function useCases() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId;
 
   useEffect(() => {
     try {
@@ -310,12 +312,10 @@ export function useCases() {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
       }
       setCases(stored);
-      const active = window.localStorage.getItem(ACTIVE_KEY);
-      setActiveId(
-        active && stored.some((item) => item.id === active)
-          ? active
-          : (stored[0]?.id ?? null),
-      );
+      // Always open into a fresh conversation layout. Saved cases remain in
+      // the sidebar and can be opened explicitly; the app must not reopen the
+      // previous conversation over a new ask.
+      setActiveId(null);
     } catch {
       setCases([]);
     }
@@ -334,24 +334,40 @@ export function useCases() {
       .catch(() => undefined);
   }, []);
 
-  const persist = useCallback((next: CaseFile[]) => {
-    setCases(next);
+  /**
+   * Every mutation goes through a functional `setCases` and is persisted in a
+   * single effect over the resulting list. That is what makes two cases safe
+   * to work on at once: a run finishing in case A and a search running in
+   * case B each apply their own update to the CURRENT list, and neither one
+   * can write a stale copy over the other — nothing a case was showing or
+   * collecting is ever lost when you switch between them.
+   */
+  const lastChangedRef = useRef<CaseFile | null>(null);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next.slice(0, 60)));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cases.slice(0, 60)));
     } catch {
       /* quota — the server copy still holds it */
     }
     if (syncTimer.current) {
       clearTimeout(syncTimer.current);
     }
+    const changed = lastChangedRef.current ?? cases[0] ?? null;
+    if (!changed) {
+      return;
+    }
     syncTimer.current = setTimeout(() => {
       fetch("/api/cases", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ case: next[0] }),
+        body: JSON.stringify({ case: changed }),
       }).catch(() => undefined);
     }, 500);
-  }, []);
+  }, [cases, hydrated]);
 
   const createCase = useCallback(
     (title?: string): CaseFile => {
@@ -366,42 +382,56 @@ export function useCases() {
         turns: [],
         notes: "",
       };
-      persist([caseFile, ...cases]);
+      lastChangedRef.current = caseFile;
+      setCases((current) => [caseFile, ...current]);
       setActiveId(caseFile.id);
       window.localStorage.setItem(ACTIVE_KEY, caseFile.id);
       return caseFile;
     },
-    [cases, persist],
+    [],
   );
 
   const updateCase = useCallback(
     (id: string, update: (caseFile: CaseFile) => CaseFile) => {
-      const next = cases.map((item) =>
-        item.id === id ? { ...update(item), updatedAt: Date.now() } : item,
-      );
-      persist(next);
+      setCases((current) => {
+        let changed: CaseFile | null = null;
+        const next = current.map((item) => {
+          if (item.id !== id) {
+            return item;
+          }
+          const updated = { ...update(item), updatedAt: Date.now() };
+          changed = updated;
+          return updated;
+        });
+        if (changed) {
+          lastChangedRef.current = changed;
+        }
+        return next;
+      });
     },
-    [cases, persist],
+    [],
   );
 
   const deleteCase = useCallback(
     (id: string) => {
-      const next = cases.filter((item) => item.id !== id);
-      persist(next);
+      setCases((current) => {
+        const next = current.filter((item) => item.id !== id);
+        if (activeIdRef.current === id) {
+          const fallback = next[0]?.id ?? null;
+          setActiveId(fallback);
+          if (fallback) {
+            window.localStorage.setItem(ACTIVE_KEY, fallback);
+          } else {
+            window.localStorage.removeItem(ACTIVE_KEY);
+          }
+        }
+        return next;
+      });
       fetch(`/api/cases?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(
         () => undefined,
       );
-      if (activeId === id) {
-        const fallback = next[0]?.id ?? null;
-        setActiveId(fallback);
-        if (fallback) {
-          window.localStorage.setItem(ACTIVE_KEY, fallback);
-        } else {
-          window.localStorage.removeItem(ACTIVE_KEY);
-        }
-      }
     },
-    [activeId, cases, persist],
+    [],
   );
 
   const selectCase = useCallback((id: string) => {
@@ -411,13 +441,16 @@ export function useCases() {
 
   const importCase = useCallback(
     (caseFile: CaseFile) => {
-      persist([
-        { ...caseFile, id: caseFile.id || newId("case") },
-        ...cases.filter((item) => item.id !== caseFile.id),
+      const imported: CaseFile = { ...caseFile, id: caseFile.id || newId("case") };
+      lastChangedRef.current = imported;
+      setCases((current) => [
+        imported,
+        ...current.filter((item) => item.id !== imported.id),
       ]);
-      setActiveId(caseFile.id);
+      setActiveId(imported.id);
+      window.localStorage.setItem(ACTIVE_KEY, imported.id);
     },
-    [cases, persist],
+    [],
   );
 
   const active = cases.find((item) => item.id === activeId) ?? null;
@@ -432,7 +465,6 @@ export function useCases() {
     deleteCase,
     selectCase,
     importCase,
-    persist,
   };
 }
 

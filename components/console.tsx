@@ -196,7 +196,11 @@ export function Console() {
   // never wipes what a case was showing or collecting. A run keeps filling
   // its own case's view even while another case is on screen.
   const [turnsByCase, setTurnsByCase] = useState<Record<string, TurnView[]>>({});
-  const [busy, setBusy] = useState(false);
+  // Busy is tracked PER CASE: a collection running in one case never blocks a
+  // search in another, and each case keeps showing its own run when you come
+  // back to it. Two runs may be in flight at once; each patches only its own
+  // case's turns.
+  const [busyCases, setBusyCases] = useState<Record<string, boolean>>({});
   const [egress, setEgress] = useState<boolean | null>(null);
   const [modelLabel, setModelLabel] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -216,10 +220,10 @@ export function Console() {
     DEFAULT_ANSWER_PREFERENCES,
   );
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const abortsRef = useRef<Record<string, AbortController>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const hydratedCaseRef = useRef<string | null>(null);
-  const startedRef = useRef<number>(0);
+  const startedByCaseRef = useRef<Record<string, number>>({});
 
   const skills = useMemo(() => manifest(), []);
 
@@ -296,13 +300,25 @@ export function Console() {
       .catch(() => setEgress(null));
   }, []);
 
+  const activeBusy = Boolean(activeCaseId && busyCases[activeCaseId]);
+  const anyBusy = Object.values(busyCases).some(Boolean);
+
   useEffect(() => {
-    if (!busy) {
+    if (!anyBusy) {
       return;
     }
-    const timer = setInterval(() => setElapsed(Date.now() - startedRef.current), 200);
+    const tick = () => {
+      const started = activeCaseId
+        ? startedByCaseRef.current[activeCaseId]
+        : Object.values(startedByCaseRef.current)[0];
+      if (started) {
+        setElapsed(Date.now() - started);
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 200);
     return () => clearInterval(timer);
-  }, [busy]);
+  }, [anyBusy, activeCaseId]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -420,8 +436,8 @@ export function Console() {
       };
 
       setTurnsFor(caseFile.id, (current) => [...current, turn]);
-      setBusy(true);
-      startedRef.current = Date.now();
+      setBusyCases((current) => ({ ...current, [caseFile.id]: true }));
+      startedByCaseRef.current[caseFile.id] = Date.now();
       setElapsed(0);
 
       // The title follows the first real question so the sidebar stays meaningful.
@@ -451,7 +467,7 @@ export function Console() {
       };
 
       const controller = new AbortController();
-      abortRef.current = controller;
+      abortsRef.current[caseFile.id] = controller;
       let serverOk = false;
 
       try {
@@ -630,7 +646,7 @@ export function Console() {
         }
       }
 
-      // Free model pass — only when the analyst asked for a model, no keyed model
+      // SkOiT Model pass — only when the analyst asked for a model, no keyed model
       // wrote this run, and there is real evidence to write up. The script loads
       // lazily and any failure leaves the built-in answer standing.
       const written = await new Promise<TurnView | null>((resolve) => {
@@ -662,7 +678,7 @@ export function Console() {
                     ...item,
                     answer: free.text as string,
                     answerMode: "model",
-                    model: "free browser model",
+                    model: "SkOiT Model",
                   }
                 : item,
             ),
@@ -671,7 +687,7 @@ export function Console() {
             type: "notice",
             level: "info",
             message:
-              "Briefing written by the free browser model over the collected evidence — sources and findings are unchanged.",
+              "Briefing written by the SkOiT Model over the collected evidence — sources and findings are unchanged.",
           });
         } else if (free.error) {
           patchTurn(caseFile.id, turn.id, {
@@ -682,8 +698,16 @@ export function Console() {
         }
       }
 
-      setBusy(false);
-      abortRef.current = null;
+      // Clear only THIS case's busy mark — a run in another case keeps going.
+      setBusyCases((current) => {
+        if (!current[caseFile.id]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[caseFile.id];
+        return next;
+      });
+      delete abortsRef.current[caseFile.id];
 
       const finished = await new Promise<TurnView | null>((resolve) => {
         setTurnsFor(caseFile.id, (current) => {
@@ -710,12 +734,24 @@ export function Console() {
     ],
   );
 
+  // Stop the run in the case that is on screen. A run in a different case is
+  // left alone — it finishes and saves on its own.
   const stop = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setBusy(false);
+    const id = activeCaseId;
+    if (id && abortsRef.current[id]) {
+      abortsRef.current[id].abort();
+      delete abortsRef.current[id];
+      setBusyCases((current) => {
+        if (!current[id]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+    }
     toast.info("Run stopped — everything collected so far is kept");
-  }, []);
+  }, [activeCaseId]);
 
   const activeTurn = turns[turns.length - 1] ?? null;
   const notices = turns.flatMap((turn) => turn.notices);
@@ -915,9 +951,14 @@ export function Console() {
                     ? `${active.turns.length} saved run(s)`
                     : "open a case to begin"}
                 </span>
-                {busy ? (
+                {activeBusy ? (
                   <span className="live-dot tabular text-primary">
                     collecting · {formatDuration(elapsed)}
+                  </span>
+                ) : null}
+                {!activeBusy && anyBusy ? (
+                  <span className="live-dot tabular text-muted-foreground">
+                    another case is collecting
                   </span>
                 ) : null}
               </div>
@@ -1001,6 +1042,7 @@ export function Console() {
           <div className="mx-auto w-full max-w-[760px] px-3.5 pt-4 pb-6 lg:px-6">
             {turns.length === 0 ? (
               <div className="py-6">
+                <div className="start-globe" aria-hidden="true"><div className="start-globe__land start-globe__land--one" /><div className="start-globe__land start-globe__land--two" /><div className="start-globe__land start-globe__land--three" /></div>
                 <div className="grain rounded-2xl border border-hairline bg-surface p-5">
                   <h1 className="text-[19px] font-semibold tracking-tight text-foreground">
                     Real collection, honest coverage
@@ -1201,7 +1243,7 @@ export function Console() {
             <Composer
               onSubmit={(submission) => void run(submission)}
               onStop={stop}
-              busy={busy}
+              busy={activeBusy}
               manifest={skills}
               onPreviewFile={(file) => {
                 if (file.previewUrl) {

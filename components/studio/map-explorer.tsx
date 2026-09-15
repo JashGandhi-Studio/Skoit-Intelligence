@@ -198,9 +198,15 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
   const mapRef = useRef<MlMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
   const tileErrorsRef = useRef(0);
+  const tilesLoadedRef = useRef(false);
+  const osmTriedRef = useRef(false);
   const activeStyleRef = useRef<"carto" | "osm" | "vector">("carto");
   const [ready, setReady] = useState(false);
   const [tilesStalled, setTilesStalled] = useState(false);
+  /** A basemap tile has actually painted — the globe is real, not a dark square. */
+  const [tilesUp, setTilesUp] = useState(false);
+  /** Neither tile provider answered in time — the static globe stands in. */
+  const [tilesDead, setTilesDead] = useState(false);
   const [noWebgl, setNoWebgl] = useState(false);
   const [globe, setGlobe] = useState(true);
   const [query, setQuery] = useState(initialQuery ?? "");
@@ -208,6 +214,18 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [info, setInfo] = useState<PlaceInfo | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
+
+  const retryTiles = useCallback(() => {
+    setTilesStalled(false);
+    tileErrorsRef.current = 0;
+    tilesLoadedRef.current = false;
+    setTilesUp(false);
+    const map = mapRef.current;
+    if (map) {
+      activeStyleRef.current = "carto";
+      map.setStyle(rasterStyle("carto"));
+    }
+  }, []);
 
   /* ------------------------------------------------------------- map setup */
   useEffect(() => {
@@ -270,6 +288,13 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
       setReady(true);
     };
     map.on("style.load", onStyleLoad);
+    map.on("sourcedata", (event) => {
+      if (event.sourceId === "basemap" && event.isSourceLoaded) {
+        tilesLoadedRef.current = true;
+        setTilesUp(true);
+        setTilesDead(false);
+      }
+    });
 
     // If the primary tiles keep erroring, quietly fall back to OSM's own
     // tiles; if those fail too, say so instead of showing a dead globe.
@@ -306,6 +331,13 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     // and a malformed style was silently repainting the globe as an empty
     // dark ball. The style is validated before it is applied, and any style
     // error afterwards reverts to the raster map above.
+    const tileWatchdog = window.setTimeout(() => {
+      if (!cancelled && !tilesLoadedRef.current) {
+        setTilesDead(true);
+        setTilesStalled(true);
+      }
+    }, 9000);
+
     (async () => {
       try {
         const response = await fetch(VECTOR_STYLE_URL, { cache: "no-store" });
@@ -336,6 +368,7 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(tileWatchdog);
       setReady(false);
       markerRef.current?.remove();
       markerRef.current = null;
@@ -494,9 +527,11 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     <div className="relative h-full w-full overflow-hidden bg-surface-2">
       <div ref={containerRef} className="absolute inset-0" />
 
-      {noWebgl ? (
-        <div className="absolute inset-0 grid place-items-center p-6 text-center">
-          <div className="max-w-[320px] space-y-2 rounded-xl border border-hairline bg-surface p-4 shadow-pop">
+      {noWebgl || tilesDead ? (
+        <div className="absolute inset-0 grid place-items-center bg-[#070b14] p-6 text-center">
+          <img src="/globe-fallback.jpg" alt="Earth from space" className="absolute inset-0 h-full w-full object-cover opacity-80" />
+          <div className="relative max-w-[340px] space-y-2 rounded-xl border border-white/15 bg-black/65 p-4 text-white shadow-pop backdrop-blur">
+            <Globe2 className="mx-auto size-6 text-cyan-300" />
             <AlertTriangle className="mx-auto size-5 text-warning" />
             <p className="text-[13px] font-semibold text-foreground">
               This browser cannot draw the globe

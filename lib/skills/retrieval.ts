@@ -1731,9 +1731,22 @@ export const videoSearch: SkillDefinition = {
             ),
         )
       : items;
-    const deduped = Array.from(
+    let deduped = Array.from(
       new Map(filtered.map((item) => [item.url, item])).values(),
     );
+
+    // B-roll, reels and social clips are intentionally short-form requests.
+    // Never answer one with a feature-length or lecture-sized asset: prefer
+    // clips under 30 seconds, then under 90 seconds, and only fall back to a
+    // longer item when no short source exists.
+    const shortForm = /\b(?:b[ -]?roll|reels?|short(?:s)?|social clip|instagram|tiktok)\b/i.test(query);
+    if (shortForm) {
+      const short = deduped.filter((item) => (item.durationMs ?? 0) > 0 && (item.durationMs ?? 0) <= 90_000);
+      if (short.length > 0) {
+        deduped = short;
+      }
+      deduped.sort((a, b) => (a.durationMs ?? Number.MAX_SAFE_INTEGER) - (b.durationMs ?? Number.MAX_SAFE_INTEGER));
+    }
     const totalMinutes = deduped.reduce(
       (total, item) => total + (item.durationMs ?? 0) / 60000,
       0,
@@ -2561,28 +2574,34 @@ export const audioSearch: SkillDefinition = {
     const jamendoKey = ctx.env("JAMENDO_CLIENT_ID");
     const failures: string[] = [];
     const items: MediaItem[] = [];
-    let previews = 0;
 
-    const archive = await archiveAudioSearch(query, limit, ctx);
-    items.push(...archive.items);
+    // Every audio library is asked at once — this used to run six fetches in
+    // a row (up to a minute of wall time), which blew the skill's budget and
+    // made audio feel dead. In parallel it costs one fetch, not six.
+    const [archive, commons, openverse, jamendo, itunes, deezer] = await Promise.all([
+      archiveAudioSearch(query, limit, ctx),
+      commonsSearch(query, "audio", limit, ctx),
+      openverseAudioSearch(query, limit, reusable, ctx),
+      jamendoKey
+        ? jamendoSearch(query, limit, jamendoKey, ctx)
+        : Promise.resolve(null),
+      itunesSearch(query, limit, ctx),
+      deezerSearch(query, limit, ctx),
+    ]);
+
+    items.push(...archive.items, ...commons.items, ...openverse.items);
     if (archive.error) {
       failures.push(`Internet Archive: ${archive.error}`);
     }
-
-    const commons = await commonsSearch(query, "audio", limit, ctx);
-    items.push(...commons.items);
     if (commons.error) {
       failures.push(`Wikimedia Commons: ${commons.error}`);
     }
-
-    const openverse = await openverseAudioSearch(query, limit, reusable, ctx);
-    items.push(...openverse.items);
     if (openverse.error) {
       failures.push(`Openverse: ${openverse.error}`);
     }
 
-    if (jamendoKey) {
-      const jamendo = await jamendoSearch(query, limit, jamendoKey, ctx);
+    let previews = 0;
+    if (jamendo) {
       items.push(...jamendo.items);
       if (jamendo.error) {
         failures.push(`Jamendo: ${jamendo.error}`);
@@ -2592,15 +2611,11 @@ export const audioSearch: SkillDefinition = {
         );
       }
     }
-
-    const itunes = await itunesSearch(query, limit, ctx);
     items.push(...itunes.items);
     previews += itunes.items.length;
     if (itunes.error) {
       failures.push(`Apple Music catalog: ${itunes.error}`);
     }
-
-    const deezer = await deezerSearch(query, limit, ctx);
     items.push(...deezer.items);
     previews += deezer.items.length;
     if (deezer.error) {

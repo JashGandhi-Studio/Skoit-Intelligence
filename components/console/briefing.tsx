@@ -33,7 +33,7 @@ export function Briefing({
   turn: TurnView;
   caseTitle: string;
   onQuickPrompt?: (prompt: string) => void;
-  /** free keyless AI polish — off when the user switched AI off in Settings */
+  /** SkOiT Model polish — off when the user switched AI off in Settings */
   allowFreeAi?: boolean;
 }) {
   const [speaking, setSpeaking] = useState(false);
@@ -42,8 +42,8 @@ export function Briefing({
   const [showOriginal, setShowOriginal] = useState(false);
   const polishAttemptedFor = useRef<string | null>(null);
 
-  // Free AI, no key: when the deterministic analyst writer produced the
-  // briefing, offer a keyless model REWORDING of that exact text. Facts must
+  // SkOiT Model, no key: when the deterministic analyst writer produced the
+  // briefing, offer a model REWORDING of that exact text. Facts must
   // survive (free-ai.ts enforces it structurally); failure is silent — the
   // deterministic briefing is always complete on its own.
   useEffect(() => {
@@ -206,12 +206,12 @@ export function Briefing({
           <Sparkles className="size-3.5 text-primary" />
           {polishing ? (
             <span className="text-[11.5px] text-muted-foreground">
-              Free AI is rewording this briefing — no key needed, facts stay locked…
+              The SkOiT Model is rewording this briefing — no key needed, facts stay locked…
             </span>
           ) : (
             <>
               <Badge tone="primary" mono>
-                free-AI polish
+                SkOiT Model polish
               </Badge>
               <span className="text-[11px] text-muted-foreground">
                 wording only — every fact and number is unchanged

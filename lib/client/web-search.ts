@@ -8,10 +8,12 @@ import {
 } from "@/lib/client/ddg-parse";
 
 /**
- * Open-web search without an API key. DuckDuckGo's HTML endpoints are scraped
- * through the relay chain, with Bing as the fallback engine. Results are plain
- * links — the skills that use them decide what counts as a paper, a product
- * listing or a good website.
+ * Open-web search without an API key. Every engine is asked at the same time
+ * (DuckDuckGo HTML, DuckDuckGo Lite, Bing, Mojeek, Ecosia) and the first one
+ * that hands back parseable results wins — a blocked or slow engine never
+ * adds its timeout to the search, which keeps the skill inside its budget.
+ * Results are plain links; the skills that use them decide what counts as a
+ * paper, a product listing or a good website.
  */
 
 export interface WebResult {
@@ -48,6 +50,59 @@ function parseBingHtml(html: string): WebResult[] {
   return results;
 }
 
+/** Mojeek results: one <li> per hit, the first anchor is the result link. */
+function parseMojeekHtml(html: string): WebResult[] {
+  const results: WebResult[] = [];
+  const blocks = html.split(/<li(?![^>]*class="[^"]*(?:divider|nav))/i).slice(1);
+  for (const block of blocks) {
+    const link = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    if (!link) {
+      continue;
+    }
+    const url = link[1];
+    const host = hostOfUrl(url);
+    const title = stripHtml(link[2]);
+    if (!host || /mojeek\./i.test(host) || title.length < 4) {
+      continue;
+    }
+    const snippetChunk =
+      /<p[^>]*>([\s\S]*?)<\/p>/i.exec(block) ??
+      /<div[^>]*class="[^"]*s_[a-z]+[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(block);
+    results.push({
+      title,
+      url,
+      snippet: snippetChunk ? stripHtml(snippetChunk[1]) : "",
+      host,
+    });
+    if (results.length >= 16) {
+      break;
+    }
+  }
+  return results;
+}
+
+/** Ecosia: result cards carry the URL and title in anchors. */
+function parseEcosiaHtml(html: string): WebResult[] {
+  const results: WebResult[] = [];
+  const pattern =
+    /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*data-track[^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null = pattern.exec(html);
+  while (match !== null && results.length < 16) {
+    const url = match[1];
+    const host = hostOfUrl(url);
+    const title = stripHtml(match[2]);
+    if (
+      host &&
+      title.length >= 4 &&
+      !/(^|\.)(ecosia|bing|microsoft|google)\./i.test(host)
+    ) {
+      results.push({ title, url, snippet: "", host });
+    }
+    match = pattern.exec(html);
+  }
+  return results;
+}
+
 function dedupe(results: DdgResult[], limit: number): WebResult[] {
   const seen = new Set<string>();
   const kept: WebResult[] = [];
@@ -65,56 +120,92 @@ function dedupe(results: DdgResult[], limit: number): WebResult[] {
   return kept;
 }
 
+interface EngineAttempt {
+  label: string;
+  url: string;
+  parse: (html: string) => WebResult[];
+}
+
+function engineRoutes(query: string): EngineAttempt[] {
+  const q = encodeURIComponent(query);
+  return [
+    {
+      label: "duckduckgo",
+      url: `https://html.duckduckgo.com/html/?q=${q}`,
+      parse: (html) => parseDdgHtml(html),
+    },
+    {
+      label: "duckduckgo-lite",
+      url: `https://lite.duckduckgo.com/lite/?q=${q}`,
+      parse: (html) => parseDdgHtml(html),
+    },
+    {
+      label: "bing",
+      url: `https://www.bing.com/search?q=${q}&count=20`,
+      parse: parseBingHtml,
+    },
+    {
+      label: "mojeek",
+      url: `https://www.mojeek.com/search?q=${q}`,
+      parse: parseMojeekHtml,
+    },
+    {
+      label: "ecosia",
+      url: `https://www.ecosia.org/search?q=${q}`,
+      parse: parseEcosiaHtml,
+    },
+  ];
+}
+
+/** Every engine in flight at once; the first parseable answer wins. */
+async function raceEngines(
+  routes: EngineAttempt[],
+  limit: number,
+  signal?: AbortSignal,
+): Promise<WebSearchOutcome> {
+  const errors: string[] = [];
+
+  const attempts = routes.map(
+    (route) =>
+      new Promise<WebSearchOutcome>((resolve) => {
+        relayText(route.url, {
+          skipDirect: true,
+          signal,
+          timeoutMs: 10_000,
+        }).then((fetched) => {
+          if (!isRelayOk(fetched)) {
+            errors.push(`${route.label}: ${fetched.error}`);
+            resolve({ results: [], engine: "none" });
+            return;
+          }
+          const parsed = route.parse(fetched.data);
+          if (parsed.length === 0) {
+            errors.push(`${route.label} returned nothing parseable`);
+            resolve({ results: [], engine: "none" });
+            return;
+          }
+          resolve({
+            results: dedupe(parsed, limit),
+            engine: `${route.label} (${fetched.via})`,
+          });
+        });
+      }),
+  );
+
+  for (const outcome of await Promise.all(attempts)) {
+    if (outcome.results.length > 0) {
+      return outcome;
+    }
+  }
+  return { results: [], engine: "none", error: errors.join(" · ") };
+}
+
 export async function webSearch(
   query: string,
   options: { limit?: number; signal?: AbortSignal } = {},
 ): Promise<WebSearchOutcome> {
   const limit = Math.min(options.limit ?? 14, 30);
-  const errors: string[] = [];
-
-  const ddg = await relayText(
-    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-    { skipDirect: true, signal: options.signal, timeoutMs: 16_000 },
-  );
-  if (isRelayOk(ddg)) {
-    const results = parseDdgHtml(ddg.data);
-    if (results.length > 0) {
-      return { results: dedupe(results, limit), engine: `duckduckgo (${ddg.via})` };
-    }
-    errors.push("duckduckgo returned no parseable results");
-  } else {
-    errors.push(`duckduckgo: ${ddg.error}`);
-  }
-
-  const lite = await relayText(
-    `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
-    { skipDirect: true, signal: options.signal, timeoutMs: 16_000 },
-  );
-  if (isRelayOk(lite)) {
-    const results = parseDdgHtml(lite.data);
-    if (results.length > 0) {
-      return { results: dedupe(results, limit), engine: `duckduckgo-lite (${lite.via})` };
-    }
-    errors.push("duckduckgo lite returned nothing");
-  } else {
-    errors.push(`duckduckgo lite: ${lite.error}`);
-  }
-
-  const bing = await relayText(
-    `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${limit}`,
-    { skipDirect: true, signal: options.signal, timeoutMs: 16_000 },
-  );
-  if (isRelayOk(bing)) {
-    const results = parseBingHtml(bing.data);
-    if (results.length > 0) {
-      return { results: dedupe(results, limit), engine: `bing (${bing.via})` };
-    }
-    errors.push("bing returned nothing");
-  } else {
-    errors.push(`bing: ${bing.error}`);
-  }
-
-  return { results: [], engine: "none", error: errors.join(" · ") };
+  return raceEngines(engineRoutes(query), limit, options.signal);
 }
 
 export function looksLikePdf(url: string): boolean {

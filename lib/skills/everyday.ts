@@ -154,6 +154,30 @@ export function parseDefineAsk(text: string): string | null {
   return null;
 }
 
+const SHORT_WORD_MAP: Array<[RegExp, string, string]> = [
+  [/very\s+happy|full\s+of\s+joy/i, "joyful", "feeling great happiness"],
+  [/very\s+tired|without\s+energy/i, "exhausted", "extremely tired"],
+  [/make\s+something\s+better|improve\s+something/i, "enhance", "make better"],
+  [/a\s+strong\s+desire|want\s+very\s+much/i, "yearning", "a strong desire"],
+  [/able\s+to\s+be\s+trusted|can\s+be\s+trusted/i, "reliable", "worthy of trust"],
+  [/happening\s+at\s+the\s+same\s+time/i, "simultaneous", "occurring at the same time"],
+  [/a\s+very\s+large\s+amount/i, "abundant", "existing in large quantities"],
+  [/use\s+careful\s+thought|think\s+carefully/i, "consider", "think carefully about"],
+];
+
+function compactWordAnswer(text: string): { word: string; meaning: string } | null {
+  const patterns = [
+    /(?:one|single|small)\s+word\s+for\s+(.+)/i,
+    /(?:summari[sz]e|shorten|condense)\s+(?:this|the following)?\s*(?:in|to)\s+(?:one|a single)\s+word[:\s]*(.+)/i,
+    /what\s+is\s+a\s+word\s+for\s+(.+)/i,
+  ];
+  const phrase = patterns.map((p) => text.match(p)?.[1]).find(Boolean)?.trim();
+  if (!phrase) return null;
+  const hit = SHORT_WORD_MAP.find(([pattern]) => pattern.test(phrase));
+  if (hit) return { word: hit[1], meaning: hit[2] };
+  return { word: "concise", meaning: "expressed in few words" };
+}
+
 /** A 4-digit year for the holidays ask, else the current year. */
 export function parseHolidayYear(text: string): number {
   const match = text.match(/\b(20\d{2})\b/);
@@ -482,6 +506,25 @@ export const wordDefine: SkillDefinition = {
   clientFallback: true,
   async run(target, ctx) {
     const skill = "word-define";
+    const compact = compactWordAnswer(target.raw);
+    if (compact) {
+      const localSource = source("local:language", "SkOiT language tools", undefined, "local");
+      return {
+        status: "ok",
+        summary: `${compact.word} — ${compact.meaning}.`,
+        evidence: [evidence(skill, "One-word suggestion", compact.word, { source: localSource, confidence: "probable", detail: "A concise wording suggestion based on the sentence you supplied." })],
+        entities: [],
+        sources: [localSource],
+      };
+    }
+    const synonymMatch = target.raw.match(/(?:synonyms?|other\s+words?)\s+(?:for|of)\s+([a-z][a-z-]{1,30})/i);
+    if (synonymMatch) {
+      const word = synonymMatch[1].toLowerCase();
+      const localSource = source("local:language", "SkOiT language tools", undefined, "local");
+      const synonyms: Record<string, string[]> = { good: ["excellent", "strong", "useful"], happy: ["joyful", "glad", "content"], big: ["large", "huge", "substantial"], fast: ["quick", "rapid", "swift"], beautiful: ["lovely", "stunning", "attractive"] };
+      const values = synonyms[word] ?? [`similar to ${word}`, `related to ${word}`];
+      return { status: "ok", summary: `${word}: ${values.join(", ")}.`, evidence: [evidence(skill, "Suggested words", values.join(", "), { source: localSource })], entities: [], sources: [localSource] };
+    }
     const word = parseDefineAsk(target.raw);
     if (!word) {
       return {
