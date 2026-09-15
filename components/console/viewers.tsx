@@ -17,6 +17,7 @@ import { isRelayOk, relayBytes } from "@/lib/client/cors-fetch";
 import { forceDownload } from "@/lib/client/download";
 import { buildStyledPdf, type PdfDocInput, type PdfSection } from "@/lib/client/pdf-make";
 import { type ExtractedArticle, keyPointsOf, readArticle } from "@/lib/client/reader";
+import { saveYoutubeVideo, youtubeIdOfEmbed } from "@/lib/client/youtube-save";
 import type { ArticleItem, MediaItem } from "@/lib/types";
 import { formatRelative, truncate } from "@/lib/utils";
 
@@ -32,13 +33,20 @@ export type ViewerRequest =
   | { type: "article"; article: ArticleItem }
   | { type: "pdf"; url: string; title: string }
   | { type: "video"; item: MediaItem }
-  | { type: "image"; item: MediaItem };
+  | { type: "image"; item: MediaItem }
+  | { type: "file"; name: string; url: string; mime?: string; sizeBytes?: number };
 
 export function viewerKey(request: ViewerRequest | null): string {
   if (!request) {
     return "none";
   }
-  return request.type === "pdf" ? `pdf:${request.url}` : `item:${request.type}`;
+  if (request.type === "pdf") {
+    return `pdf:${request.url}`;
+  }
+  if (request.type === "file") {
+    return `file:${request.name}:${request.url}`;
+  }
+  return `item:${request.type}`;
 }
 
 /* ------------------------------------------------------------- reader ----- */
@@ -260,6 +268,7 @@ function PdfPane({ url, title }: { url: string; title: string }) {
     | { phase: "loading" }
     | { phase: "error"; message: string }
     | { phase: "ready"; blobUrl: string }
+    | { phase: "direct" }
   >({ phase: "loading" });
 
   useEffect(() => {
@@ -267,7 +276,7 @@ function PdfPane({ url, title }: { url: string; title: string }) {
     let created: string | null = null;
     setState({ phase: "loading" });
     (async () => {
-      const fetched = await relayBytes(url);
+      const fetched = await relayBytes(url, { timeoutMs: 20_000 });
       if (!alive) {
         return;
       }
@@ -277,6 +286,10 @@ function PdfPane({ url, title }: { url: string; title: string }) {
         });
         created = URL.createObjectURL(blob);
         setState({ phase: "ready", blobUrl: created });
+      } else if (/^https?:\/\//i.test(url)) {
+        // The relay chain failed, but the browser may still display the PDF
+        // directly from the publisher (its own viewer needs no CORS).
+        setState({ phase: "direct" });
       } else {
         setState({ phase: "error", message: fetched.error });
       }
@@ -336,6 +349,13 @@ function PdfPane({ url, title }: { url: string; title: string }) {
           Fetching the PDF…
         </div>
       ) : null}
+      {state.phase === "direct" ? (
+        <iframe
+          src={url}
+          title={`PDF preview — ${title}`}
+          className="h-[70dvh] min-h-100 w-full rounded-xl border border-hairline bg-surface-2"
+        />
+      ) : null}
       {state.phase === "error" ? (
         <div className="rounded-xl border border-hairline bg-surface-2/50 px-3.5 py-4 text-[12.5px] leading-relaxed text-muted-foreground">
           <p className="mb-2 font-medium text-foreground">
@@ -357,10 +377,178 @@ function PdfPane({ url, title }: { url: string; title: string }) {
   );
 }
 
+/* --------------------------------------------------------------- file ----- */
+
+function kindOf(
+  mime: string | undefined,
+  name: string,
+): "image" | "video" | "audio" | "pdf" | "text" | "other" {
+  const type = (mime ?? "").toLowerCase();
+  if (type.startsWith("image/")) return "image";
+  if (type.startsWith("video/")) return "video";
+  if (type.startsWith("audio/")) return "audio";
+  if (type === "application/pdf" || /\.pdf$/i.test(name)) return "pdf";
+  if (
+    type.startsWith("text/") ||
+    /^(application\/(json|xml|javascript|x-yaml|sql|csv|rtf))/i.test(type) ||
+    /\.(txt|json|csv|log|md|eml|xml|yaml|yml|srt|vtt|html?|ts|tsx|js|py|java|c|cpp|css)$/i.test(
+      name,
+    )
+  ) {
+    return "text";
+  }
+  return "other";
+}
+
+/**
+ * The everything-else viewer: any file the analyst attached opens here —
+ * images, audio, video, PDFs, plain text — with an honest card (and a
+ * download) for formats a browser cannot render.
+ */
+function FilePane({
+  name,
+  url,
+  mime,
+  sizeBytes,
+}: {
+  name: string;
+  url: string;
+  mime?: string;
+  sizeBytes?: number;
+}) {
+  const kind = kindOf(mime, name);
+  const [text, setText] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (kind !== "text") {
+      return;
+    }
+    let alive = true;
+    fetch(url)
+      .then((response) => response.text())
+      .then((value) => {
+        if (alive) {
+          setText(value.slice(0, 60_000));
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setText(null);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [kind, url]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <FileText className="size-4 shrink-0 text-faint-foreground" />
+        <span
+          className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground"
+          title={name}
+        >
+          {name}
+        </span>
+        {sizeBytes ? (
+          <Badge tone="neutral" mono>
+            {(sizeBytes / 1024 / 1024).toFixed(1)} MB
+          </Badge>
+        ) : null}
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => {
+            void forceDownload(url, name, {}).then((result) => {
+              toast[result.mode === "failed" ? "error" : "success"](
+                result.mode === "failed"
+                  ? "The file could not be saved"
+                  : `Saved ${result.filename}`,
+              );
+            });
+          }}
+        >
+          <Download />
+          Download
+        </Button>
+      </div>
+
+      {kind === "image" ? (
+        // biome-ignore lint/performance/noImgElement: the analyst's own file, shown locally
+        <img
+          src={url}
+          alt={name}
+          className="max-h-[64dvh] w-full rounded-xl border border-hairline object-contain"
+        />
+      ) : null}
+
+      {kind === "video" ? (
+        // biome-ignore lint/a11y/useMediaCaption: user's own file, no caption track exists
+        <video
+          src={url}
+          controls
+          playsInline
+          className="max-h-[64dvh] w-full rounded-xl border border-hairline bg-black"
+        />
+      ) : null}
+
+      {kind === "audio" ? (
+        // biome-ignore lint/a11y/useMediaCaption: user's own file, no caption track exists
+        <audio src={url} controls className="w-full" />
+      ) : null}
+
+      {kind === "pdf" ? (
+        <iframe
+          src={url}
+          title={`PDF preview — ${name}`}
+          className="h-[64dvh] w-full rounded-xl border border-hairline bg-surface-2"
+        />
+      ) : null}
+
+      {kind === "text" ? (
+        <pre className="thin-scroll max-h-[60dvh] overflow-auto rounded-xl border border-hairline bg-surface-2/60 p-3 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-foreground">
+          {text ?? "Reading the file…"}
+        </pre>
+      ) : null}
+
+      {kind === "other" ? (
+        <div className="rounded-xl border border-hairline bg-surface-2/60 px-3.5 py-4 text-[12.5px] leading-relaxed text-muted-foreground">
+          <p className="mb-1 font-medium text-foreground">
+            {mime || "Unknown format"} — the browser cannot display this one.
+          </p>
+          <p>The file is attached intact; use Download to save a copy.</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* -------------------------------------------------------------- video ----- */
 
 function VideoPane({ item }: { item: MediaItem }) {
   const embed = item.embedUrl;
+  const videoId = youtubeIdOfEmbed(embed);
+  const [saving, setSaving] = useState(false);
+
+  const saveYoutube = () => {
+    if (!videoId) {
+      return;
+    }
+    setSaving(true);
+    const toastId = toast.loading("Looking for a downloadable stream…");
+    void saveYoutubeVideo(videoId, item.title).then((result) => {
+      setSaving(false);
+      if (result.mode === "saved") {
+        toast.success(`Saved “${truncate(item.title, 48)}”`, { id: toastId });
+      } else {
+        toast.info("No direct stream answered — the video opened on YouTube instead", {
+          id: toastId,
+        });
+      }
+    });
+  };
+
   return (
     <div className="space-y-3">
       <div className="overflow-hidden rounded-xl border border-hairline bg-black">
@@ -391,6 +579,33 @@ function VideoPane({ item }: { item: MediaItem }) {
         <Badge tone="neutral" mono>
           {item.source}
         </Badge>
+        {embed && videoId ? (
+          <Button variant="primary" size="sm" disabled={saving} onClick={saveYoutube}>
+            {saving ? <LoaderCircle className="animate-spin" /> : <Download />}
+            Download
+          </Button>
+        ) : null}
+        {!embed ? (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              void forceDownload(item.url, item.title, {
+                ext: ".mp4",
+                prefix: "skoit-clip",
+              }).then((result) => {
+                toast[result.mode === "failed" ? "error" : "success"](
+                  result.mode === "failed"
+                    ? "The source refused a direct copy — it opened in a tab instead"
+                    : `Saved ${result.filename}`,
+                );
+              });
+            }}
+          >
+            <Download />
+            Download
+          </Button>
+        ) : null}
         <a
           href={item.pageUrl ?? item.url}
           target="_blank"
@@ -404,8 +619,8 @@ function VideoPane({ item }: { item: MediaItem }) {
       {embed ? (
         <p className="text-[10.5px] leading-relaxed text-faint-foreground">
           Played through YouTube's official player — views count for the creator, and
-          their terms apply. For downloadable licence-clear footage, ask for “licence-free
-          footage of …”.
+          their terms apply. Download saves the public stream where a mirror provides it;
+          otherwise the video opens on its source page.
         </p>
       ) : null}
     </div>
@@ -511,7 +726,9 @@ export function ViewerDialog({
         ? "PDF viewer"
         : request?.type === "video"
           ? "Video player"
-          : "Image viewer";
+          : request?.type === "file"
+            ? "File viewer"
+            : "Image viewer";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -522,6 +739,14 @@ export function ViewerDialog({
         ) : null}
         {request?.type === "video" ? <VideoPane item={request.item} /> : null}
         {request?.type === "image" ? <ImagePane item={request.item} /> : null}
+        {request?.type === "file" ? (
+          <FilePane
+            name={request.name}
+            url={request.url}
+            mime={request.mime}
+            sizeBytes={request.sizeBytes}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   );

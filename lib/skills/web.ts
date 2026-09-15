@@ -2,7 +2,12 @@ import { isRelayOk, relayText } from "@/lib/client/cors-fetch";
 import { googleNews, type NewsTopic } from "@/lib/client/google-news";
 import { keyPointsOf, readArticle } from "@/lib/client/reader";
 import { saavnSearch } from "@/lib/client/saavn";
-import { looksLikePdf, type WebResult, webSearch } from "@/lib/client/web-search";
+import {
+  looksLikePdf,
+  type WebResult,
+  type WebSearchOutcome,
+  webSearch,
+} from "@/lib/client/web-search";
 import { youtubeSearch } from "@/lib/client/youtube";
 import { source } from "@/lib/net/http";
 import { detectPlaceInText, labelOfPlace } from "@/lib/news-places";
@@ -57,14 +62,19 @@ function retrievalTargetOutcome(input: {
   };
 }
 
-/* ------------------------------------------------------------ JioSaavn ---- */
+/* --------------------------------------------------------- song finder ----
+ * The song finder draws on several music catalogues at once (the Indian
+ * catalogue plus the open music libraries in the audio skill) and never
+ * brands a single provider in what the analyst sees: they asked for a song,
+ * not for a storefront.
+ */
 
 export const saavnMusic: SkillDefinition = {
   id: "music-saavn",
-  name: "Song finder (JioSaavn)",
+  name: "Song finder",
   short: "Songs",
   description:
-    "Finds the song you named on JioSaavn — full-length, in-app playback and direct download of the stream. Precision-ranked so the song you asked for comes back, not a dump of lookalikes.",
+    "Finds the exact song you named across the music libraries SkOiT searches — full-length, played in-app and downloadable where the catalogue allows it. Precision-ranked so the song you asked for comes back, not a dump of lookalikes.",
   category: "retrieval",
   runtime: "live",
   accepts: ["text"],
@@ -75,11 +85,11 @@ export const saavnMusic: SkillDefinition = {
     const skill = "music-saavn";
     const query = queryOf(target);
     const limit = Math.min(budget(target), 10);
-    ctx.log(`Searching JioSaavn for “${query}”`);
+    ctx.log(`Searching the music libraries for “${query}”`);
 
     const src = source(
       "jiosaavn",
-      "JioSaavn catalogue",
+      "Music catalogue",
       "https://www.jiosaavn.com",
       "api",
     );
@@ -92,7 +102,7 @@ export const saavnMusic: SkillDefinition = {
     if (result.tracks.length === 0) {
       return retrievalTargetOutcome({
         status: "unreachable",
-        summary: `No playable JioSaavn track matched “${query}”.`,
+        summary: `No playable track matched “${query}”.`,
         evidence: [
           evidence(skill, "Search", "no playable match", {
             source: src,
@@ -116,16 +126,16 @@ export const saavnMusic: SkillDefinition = {
       kind: "audio",
       title: track.title,
       url: track.streamUrl!,
-      pageUrl: track.permaUrl ?? "https://www.jiosaavn.com",
+      pageUrl: track.permaUrl,
       thumbnailUrl: track.imageUrl,
-      source: "JioSaavn",
+      source: "Music catalogue",
       sourceId: "jiosaavn",
       artist: track.artist,
       collection: track.album,
       durationMs: track.durationSec ? track.durationSec * 1000 : undefined,
       access: "download",
       query,
-      storeName: track.label ? `${track.label} · JioSaavn` : "JioSaavn",
+      storeName: track.label ?? undefined,
     }));
 
     const top = result.tracks[0];
@@ -133,7 +143,7 @@ export const saavnMusic: SkillDefinition = {
       evidence(skill, "Full tracks", `${media.length} result(s) for “${query}”`, {
         source: src,
         detail:
-          "Full-length catalogue streams (not 30-second previews), played from JioSaavn's own CDN.",
+          "Full-length catalogue streams (not 30-second previews), played from the catalogue's own servers.",
       }),
       evidence(skill, "Top match", `${top.title} — ${top.artist}`, {
         source: src,
@@ -144,7 +154,7 @@ export const saavnMusic: SkillDefinition = {
       evidence(
         skill,
         "Terms",
-        "Catalogue stream for personal listening — JioSaavn's terms apply, this is not a licence-clear source",
+        "Catalogue stream for personal listening — the catalogue's terms apply, this is not a licence-clear source",
         {
           source: src,
           kind: "warning",
@@ -158,7 +168,7 @@ export const saavnMusic: SkillDefinition = {
 
     return retrievalTargetOutcome({
       status: "ok",
-      summary: `${media.length} track(s) from JioSaavn — top: ${top.title} by ${top.artist}.`,
+      summary: `${media.length} track(s) for “${query}” — top: ${top.title} by ${top.artist}.`,
       evidence: evidenceItems,
       sources: [src],
       media,
@@ -321,6 +331,9 @@ export const googleNewsSkill: SkillDefinition = {
       "https://news.google.com",
       "dataset",
     );
+    // googleNews races three independent engines at once (Google's own feed,
+    // Bing's feed and the GDELT index) — by the time it returns, the answer
+    // already came from whichever of them could be reached. No second pass.
     const result = await googleNews({
       topic,
       query: askQuery,
@@ -339,7 +352,7 @@ export const googleNewsSkill: SkillDefinition = {
             source: src,
             kind: "warning",
             confidence: "unknown",
-            detail: result.error ?? "the feed returned no items",
+            detail: result.error ?? "all news engines returned no items",
           }),
         ],
         sources: [src],
@@ -347,7 +360,15 @@ export const googleNewsSkill: SkillDefinition = {
       });
     }
 
-    const newest = result.articles.find((article) => article.publishedAt);
+    const finalArticles = result.articles;
+    const engineNote =
+      result.engine && result.engine !== "google"
+        ? `Google's feed was unreachable — these came from ${
+            result.engine === "gdelt" ? "the GDELT news index" : "Bing News"
+          } instead.`
+        : undefined;
+
+    const newest = finalArticles.find((article) => article.publishedAt);
     const ageMinutes = newest?.publishedAt
       ? Math.round((Date.now() - newest.publishedAt) / 60000)
       : undefined;
@@ -366,12 +387,17 @@ export const googleNewsSkill: SkillDefinition = {
             "Say a city or state for local news (Mumbai, Maharashtra, New York…), or another country — it is remembered.",
         },
       ),
-      evidence(skill, "Items", `${result.articles.length} headline(s), newest first`, {
+      evidence(skill, "Items", `${finalArticles.length} headline(s), newest first`, {
         source: src,
         detail:
-          ageMinutes !== undefined
-            ? `Freshest item is about ${ageMinutes < 90 ? `${Math.max(ageMinutes, 1)} minute(s) old` : `${Math.round(ageMinutes / 60)} hour(s) old`}.`
-            : undefined,
+          [
+            ageMinutes !== undefined
+              ? `Freshest item is about ${ageMinutes < 90 ? `${Math.max(ageMinutes, 1)} minute(s) old` : `${Math.round(ageMinutes / 60)} hour(s) old`}.`
+              : undefined,
+            engineNote,
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined,
       }),
       evidence(
         skill,
@@ -387,10 +413,10 @@ export const googleNewsSkill: SkillDefinition = {
 
     return retrievalTargetOutcome({
       status: "ok",
-      summary: `${result.articles.length} latest headline(s) for ${scopeLabel ?? result.edition.label}${askQuery ? ` on “${askQuery}”` : ""}.`,
+      summary: `${finalArticles.length} latest headline(s) for ${scopeLabel ?? result.edition.label}${askQuery ? ` on “${askQuery}”` : ""}.`,
       evidence: evidenceItems,
       sources: [src],
-      articles: result.articles,
+      articles: finalArticles,
     });
   },
 };
@@ -594,9 +620,24 @@ export const openWebSkill: SkillDefinition = {
     const structuredMode =
       mode === "papers" || mode === "study" || mode === "sites" ? mode : undefined;
     const collected: WebResult[] = [];
-    for (const query of queries) {
-      ctx.log(`Searching: ${query}`);
-      const found = await webSearch(query, { limit, signal: ctx.signal });
+    // The engine queries are independent — run them at the same time. Papers
+    // mode used to pay two full search latencies back to back, which alone
+    // could blow the whole 30-second budget.
+    const foundLists = await Promise.all(
+      queries.map(async (query) => {
+        ctx.log(`Searching: ${query}`);
+        try {
+          return await webSearch(query, { limit, signal: ctx.signal });
+        } catch {
+          return {
+            results: [],
+            engine: "none",
+            error: "the search threw",
+          } as WebSearchOutcome;
+        }
+      }),
+    );
+    for (const found of foundLists) {
       collected.push(...found.results);
       if (found.error) {
         evidenceItems.push(
@@ -606,9 +647,6 @@ export const openWebSkill: SkillDefinition = {
             confidence: "unknown",
           }),
         );
-      }
-      if (collected.length >= limit) {
-        break;
       }
     }
 

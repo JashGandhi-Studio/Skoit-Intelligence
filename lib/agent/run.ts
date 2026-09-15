@@ -36,10 +36,39 @@ export interface RunOptions {
   ) => Promise<{ text: string; mode: "model" | "analyst"; model?: string }>;
 }
 
-const STEP_TIMEOUT_MS = 22_000;
+/**
+ * Per-step budget. The run executes steps concurrently, so this is a *wall
+ * clock* ceiling per skill, not a sum: a six-skill run still finishes inside
+ * roughly one budget, which is what keeps answers under the ~30s the console
+ * promises. Retrieval sources answer in 3–8s when healthy; anything slower is
+ * reported as unreachable instead of stalling the whole turn.
+ */
+const STEP_TIMEOUT_MS = 18_000;
+/** How many skills collect at the same time. Kept modest to stay polite. */
+const STEP_CONCURRENCY = 4;
 
 function emptyOutcome(summary: string): SkillOutcome {
   return { status: "skipped", summary, evidence: [], entities: [], sources: [] };
+}
+
+/** Runs async jobs with a concurrency ceiling, preserving input order. */
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  job: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        await job(items[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
 }
 
 export async function runAnalysis(options: RunOptions): Promise<{
@@ -127,16 +156,16 @@ export async function runAnalysis(options: RunOptions): Promise<{
     }
   };
 
-  for (const step of plan.steps) {
+  const runStep = async (step: PlannedStep) => {
     if (ctx.signal.aborted) {
       step.status = "skipped";
-      continue;
+      return;
     }
 
     const skill = getSkill(step.skillId);
     if (!skill) {
       step.status = "skipped";
-      continue;
+      return;
     }
 
     step.status = "running";
@@ -234,7 +263,12 @@ export async function runAnalysis(options: RunOptions): Promise<{
     }
 
     outcomes.push({ step, outcome, durationMs: Date.now() - stepStart });
-  }
+  };
+
+  // Skills in a plan are independent by construction, so they collect at the
+  // same time (bounded): a four-skill retrieval finishes in roughly the time of
+  // its slowest source instead of the sum of all of them.
+  await mapWithConcurrency(plan.steps, STEP_CONCURRENCY, runStep);
 
   const bundle: AnalysisBundle = {
     question: request.message,

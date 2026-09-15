@@ -194,7 +194,8 @@ export interface AnswerPreferences {
   userName?: string;
   /**
    * Where written briefings come from: your own keys when they exist, otherwise
-   * a free in-browser model — off keeps everything deterministic.
+   * the SkOiT Model (SkOiT Intelligence, in-browser, no key) — off keeps
+   * everything deterministic.
    */
   ai?: "auto" | "off";
   /**

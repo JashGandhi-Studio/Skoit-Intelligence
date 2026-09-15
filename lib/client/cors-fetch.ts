@@ -44,6 +44,11 @@ interface Relay {
   textPreferred?: boolean;
 }
 
+/**
+ * Every public CORS relay the console knows, raced at once — a dead relay no
+ * longer adds its full timeout to a fetch, the first live one wins. The list
+ * is deliberately broad: on any given network one or two of these will answer.
+ */
 const RELAYS: Relay[] = [
   {
     label: "allorigins",
@@ -58,14 +63,104 @@ const RELAYS: Relay[] = [
     wrap: (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
   },
   {
-    label: "thingproxy",
+    label: "corsproxy-org",
+    wrap: (u) => `https://corsproxy.org/?url=${encodeURIComponent(u)}`,
+  },
+  {
+    label: "isomorphic",
+    wrap: (u) => `https://cors.isomorphic-git.org/${u}`,
+  },
+  {
+    label: "allorigins-json",
     wrap: (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
     textPreferred: true,
   },
 ];
 
-const DIRECT_TIMEOUT_MS = 5_000;
-const RELAY_TIMEOUT_MS = 14_000;
+const DIRECT_TIMEOUT_MS = 4_000;
+const RELAY_TIMEOUT_MS = 9_000;
+const RELAY_RACE_STAGGER_MS = 250;
+
+/**
+ * True when this module runs inside Node (the API route) rather than the
+ * browser. The server has its own egress — routing it through public CORS
+ * relays would only add latency and a third party that can be down. Everything
+ * therefore goes direct on the server; the relay chain remains a browser-only
+ * device for sources that refuse cross-origin reads.
+ */
+const ON_SERVER = typeof window === "undefined";
+
+/** A browser-like UA: several engines serve scrapes only to real clients. */
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+
+function fetchInit(init: RequestInit | undefined): RequestInit {
+  const merged: RequestInit = { ...init, cache: "no-store" };
+  if (ON_SERVER) {
+    const headers = new Headers(init?.headers ?? {});
+    if (!headers.has("user-agent")) {
+      headers.set("user-agent", BROWSER_UA);
+    }
+    if (!headers.has("accept-language")) {
+      headers.set("accept-language", "en-IN,en;q=0.9,hi;q=0.8");
+    }
+    merged.headers = headers;
+  }
+  return merged;
+}
+
+/** Resolve on the first fetch that answers ok; reject if every route fails. */
+async function raceRoutes(
+  routes: Array<{ label: string; url: string; timeoutMs: number; init?: RequestInit }>,
+  outerSignal?: AbortSignal,
+): Promise<{ label: string; response: Response }> {
+  if (routes.length === 1) {
+    const route = routes[0];
+    return {
+      label: route.label,
+      response: await timedFetch(route.url, route.init, route.timeoutMs, outerSignal),
+    };
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let failures = 0;
+    let cancelled = false;
+    const onCancel = () => {
+      cancelled = true;
+      reject(new Error("aborted"));
+    };
+    outerSignal?.addEventListener("abort", onCancel, { once: true });
+    routes.forEach((route, index) => {
+      const start = async () => {
+        try {
+          const response = await timedFetch(
+            route.url,
+            route.init,
+            route.timeoutMs,
+            outerSignal,
+          );
+          if (!settled) {
+            if (response.ok) {
+              settled = true;
+              resolve({ label: route.label, response });
+            } else {
+              throw new Error(String(response.status));
+            }
+          }
+        } catch {
+          if (!settled && !cancelled) {
+            failures += 1;
+            if (failures >= routes.length) {
+              settled = true;
+              reject(new Error(`all ${routes.length} route(s) failed`));
+            }
+          }
+        }
+      };
+      setTimeout(() => void start(), index * RELAY_RACE_STAGGER_MS);
+    });
+  });
+}
 
 async function timedFetch(
   url: string,
@@ -78,7 +173,10 @@ async function timedFetch(
   const onAbort = () => controller.abort();
   outerSignal?.addEventListener("abort", onAbort, { once: true });
   try {
-    return await fetch(url, { ...init, signal: controller.signal, cache: "no-store" });
+    return await fetch(url, {
+      ...fetchInit(init),
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timer);
     outerSignal?.removeEventListener("abort", onAbort);
@@ -120,13 +218,20 @@ export async function relayText(
   const tried: string[] = [];
   const { accept, signal, skipDirect } = options;
 
-  if (!skipDirect) {
+  // On the server there is no CORS, so a direct call is the fast path — but a
+  // few engines refuse datacenter IPs outright, so on a direct refusal the
+  // relay chain still gets a say before the run reports a dead source.
+  // skipDirect is a browser-only economy (skip a fetch the browser would
+  // refuse anyway); the server has no CORS, so direct is always worth trying.
+  let skipDirectNow = Boolean(skipDirect) && !ON_SERVER;
+  if (ON_SERVER) {
     tried.push("direct");
+    skipDirectNow = true; // the chain below must not repeat the attempt
     try {
       const response = await timedFetch(
         url,
         { headers: directHeaders(accept) },
-        options.timeoutMs ?? DIRECT_TIMEOUT_MS,
+        Math.min(options.timeoutMs ?? 12_000, 10_000),
         signal,
       );
       if (response.ok) {
@@ -137,37 +242,58 @@ export async function relayText(
         };
       }
     } catch {
-      /* direct refused or unreachable — the chain continues */
+      /* direct refused or unreachable — relays are next */
     }
   }
 
+  const routes: Array<{
+    label: string;
+    url: string;
+    timeoutMs: number;
+    init?: RequestInit;
+  }> = [];
+  if (!skipDirectNow) {
+    tried.push("direct");
+    routes.push({
+      label: "direct",
+      url,
+      timeoutMs: options.timeoutMs ?? DIRECT_TIMEOUT_MS,
+      init: { headers: directHeaders(accept) },
+    });
+  }
   for (const relay of RELAYS) {
     tried.push(relay.label);
-    try {
-      const response = await timedFetch(
-        relay.wrap(url),
-        { headers: directHeaders(accept) },
-        options.timeoutMs ?? RELAY_TIMEOUT_MS,
-        signal,
-      );
-      if (!response.ok) {
-        continue;
-      }
-      const body = await readBody(response);
-      if (body.length === 0) {
-        continue;
-      }
-      return { data: body, via: relay.label, ms: Date.now() - started };
-    } catch {
-      /* next relay */
-    }
+    routes.push({
+      label: relay.label,
+      url: relay.wrap(url),
+      timeoutMs: options.timeoutMs ?? RELAY_TIMEOUT_MS,
+      init: { headers: directHeaders(accept) },
+    });
   }
 
-  return {
-    error: `no route to the source (tried ${tried.join(", ")})`,
-    tried,
-    ms: Date.now() - started,
-  };
+  try {
+    // Every route is raced (relays slightly staggered to protect their rate
+    // limits) — the first one to answer wins, so a dead relay no longer adds
+    // its full timeout to every fetch.
+    const winner = await raceRoutes(routes, signal);
+    const body = await readBody(winner.response);
+    if (body.length === 0) {
+      return {
+        error: `the source answered empty (via ${winner.label})`,
+        tried,
+        ms: Date.now() - started,
+      };
+    }
+    return { data: body, via: winner.label, ms: Date.now() - started };
+  } catch {
+    return {
+      error: signal?.aborted
+        ? "cancelled"
+        : `no route to the source (tried ${tried.join(", ")})`,
+      tried,
+      ms: Date.now() - started,
+    };
+  }
 }
 
 /** Fetch a JSON API through the same chain. */
@@ -216,93 +342,87 @@ export async function relayBytes(
   const started = Date.now();
   const tried: string[] = [];
 
-  tried.push("direct");
-  try {
-    const response = await timedFetch(
-      url,
-      undefined,
-      options.timeoutMs ?? RELAY_TIMEOUT_MS,
-      options.signal,
-    );
-    if (response.ok) {
-      const buffer = await response.arrayBuffer();
-      return {
-        data: {
-          bytes: new Uint8Array(buffer),
-          mime: response.headers.get("content-type") ?? "",
-        },
-        via: "direct",
-        ms: Date.now() - started,
-      };
+  // Server: direct is the fast path; the binary-safe relays stay as backup
+  // for publishers that block datacenter ranges.
+  if (ON_SERVER) {
+    tried.push("direct");
+    try {
+      const response = await timedFetch(
+        url,
+        undefined,
+        Math.min(options.timeoutMs ?? 12_000, 10_000),
+        options.signal,
+      );
+      if (response.ok) {
+        const buffer = await response.arrayBuffer();
+        return {
+          data: {
+            bytes: new Uint8Array(buffer),
+            mime: response.headers.get("content-type") ?? "",
+          },
+          via: "direct",
+          ms: Date.now() - started,
+        };
+      }
+    } catch {
+      /* fall through to the shared relay chain */
     }
-  } catch {
-    /* chain continues */
   }
+
+  const routes: Array<{
+    label: string;
+    url: string;
+    timeoutMs: number;
+    init?: RequestInit;
+  }> = ON_SERVER
+    ? [] // the server already attempted direct above
+    : [{ label: "direct", url, timeoutMs: options.timeoutMs ?? RELAY_TIMEOUT_MS }];
 
   // Images get one extra, extremely reliable route: the wsrv.nl image proxy
   // (CORS-open, binary-safe, long-lived). It only ever serves images.
   if (/\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(url) || /image/i.test(url)) {
     tried.push("wsrv");
-    try {
-      const bare = url.replace(/^https?:\/\//, "");
-      const response = await timedFetch(
-        `https://wsrv.nl/?url=${encodeURIComponent(bare)}&n=-1`,
-        undefined,
-        options.timeoutMs ?? RELAY_TIMEOUT_MS,
-        options.signal,
-      );
-      if (response.ok) {
-        const buffer = await response.arrayBuffer();
-        if (buffer.byteLength > 0) {
-          return {
-            data: {
-              bytes: new Uint8Array(buffer),
-              mime: response.headers.get("content-type") || "image/jpeg",
-            },
-            via: "wsrv",
-            ms: Date.now() - started,
-          };
-        }
-      }
-    } catch {
-      /* chain continues */
-    }
+    routes.push({
+      label: "wsrv",
+      url: `https://wsrv.nl/?url=${encodeURIComponent(url.replace(/^https?:\/\//, ""))}&n=-1`,
+      timeoutMs: options.timeoutMs ?? RELAY_TIMEOUT_MS,
+    });
   }
 
   for (const relay of RELAYS.filter((item) => !item.textPreferred)) {
     tried.push(relay.label);
-    try {
-      const response = await timedFetch(
-        relay.wrap(url),
-        undefined,
-        options.timeoutMs ?? RELAY_TIMEOUT_MS,
-        options.signal,
-      );
-      if (!response.ok) {
-        continue;
-      }
-      const buffer = await response.arrayBuffer();
-      if (buffer.byteLength === 0) {
-        continue;
-      }
-      return {
-        data: {
-          bytes: new Uint8Array(buffer),
-          mime: response.headers.get("content-type") ?? "",
-        },
-        via: relay.label,
-        ms: Date.now() - started,
-      };
-    } catch {
-      /* next relay */
-    }
+    routes.push({
+      label: relay.label,
+      url: relay.wrap(url),
+      timeoutMs: options.timeoutMs ?? RELAY_TIMEOUT_MS,
+    });
   }
 
-  return {
-    error: `no route to the file (tried ${tried.join(", ")})`,
-    tried,
-    ms: Date.now() - started,
-  };
+  try {
+    const winner = await raceRoutes(routes, options.signal);
+    const buffer = await winner.response.arrayBuffer();
+    if (buffer.byteLength === 0) {
+      return {
+        error: `the file arrived empty (via ${winner.label})`,
+        tried,
+        ms: Date.now() - started,
+      };
+    }
+    return {
+      data: {
+        bytes: new Uint8Array(buffer),
+        mime: winner.response.headers.get("content-type") ?? "",
+      },
+      via: winner.label,
+      ms: Date.now() - started,
+    };
+  } catch {
+    return {
+      error: `no route to the file (tried ${tried.join(", ")})`,
+      tried,
+      ms: Date.now() - started,
+    };
+  }
 }
 
 export function hostOf(url: string): string {

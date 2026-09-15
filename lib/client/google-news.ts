@@ -1,4 +1,4 @@
-import { hostOf, isRelayOk, relayText } from "@/lib/client/cors-fetch";
+import { hostOf, isRelayOk, relayJson, relayText } from "@/lib/client/cors-fetch";
 import { editionByCode, type NewsEdition } from "@/lib/news-editions";
 import type { NewsPlace } from "@/lib/news-places";
 import type { ArticleItem } from "@/lib/types";
@@ -44,6 +44,8 @@ export interface GoogleNewsResult {
   edition: NewsEdition;
   via: string;
   query?: string;
+  /** Which engine answered: google | bing | gdelt */
+  engine?: "google" | "bing" | "gdelt";
   /** Present when the feed was scoped to a city or state. */
   placeLabel?: string;
 }
@@ -168,41 +170,38 @@ export function splitTitle(
   return { headline: raw, source: sourceName };
 }
 
-export async function googleNews(options: {
-  topic?: NewsTopic;
-  query?: string;
-  countryCode?: string;
-  place?: NewsPlace;
-  limit?: number;
-  signal?: AbortSignal;
-}): Promise<GoogleNewsResult & { error?: string }> {
-  const edition =
-    editionByCode(options.countryCode ?? options.place?.country) ??
-    editionByCode("world");
-  if (!edition) {
-    return {
-      articles: [],
-      edition: editionByCode("world")!,
-      via: "none",
-      error: "no edition",
-    };
-  }
+interface NewsEngineResult {
+  articles: ArticleItem[];
+  via: string;
+  error?: string;
+}
+
+async function fetchGoogleFeed(
+  options: {
+    topic?: NewsTopic;
+    query?: string;
+    place?: NewsPlace;
+    signal?: AbortSignal;
+  },
+  edition: NewsEdition,
+  limit: number,
+): Promise<NewsEngineResult> {
   const url = feedUrl(options.topic, options.query, edition, options.place);
   const fetched = await relayText(url, {
     accept: "application/rss+xml, application/xml, text/xml, */*",
     skipDirect: true,
+    timeoutMs: 10_000,
     signal: options.signal,
   });
 
   if (!isRelayOk(fetched)) {
-    return { articles: [], edition, via: "none", error: fetched.error };
+    return { articles: [], via: "none", error: fetched.error };
   }
 
   const xml = fetched.data;
   if (!/<rss|<feed|<item/i.test(xml)) {
     return {
       articles: [],
-      edition,
       via: fetched.via,
       error: "the response was not a news feed",
     };
@@ -237,13 +236,157 @@ export async function googleNews(options: {
     new Map(articles.map((article) => [article.url, article])).values(),
   )
     .sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
-    .slice(0, options.limit ?? 24);
+    .slice(0, limit);
+
+  return { articles: deduped, via: fetched.via };
+}
+
+/**
+ * GDELT DOC 2.0 — the third engine. A public JSON API with no key and no
+ * quota drama; when both RSS feeds are blocked on a network, GDELT almost
+ * always still answers, so the news ask does not die with the relays.
+ */
+async function fetchGdeltNews(
+  options: {
+    query?: string;
+    countryCode?: string;
+    signal?: AbortSignal;
+  },
+  edition: NewsEdition,
+  limit: number,
+): Promise<NewsEngineResult> {
+  const trimmedQuery = (options.query ?? "").trim();
+  const query = trimmedQuery.length > 0 ? trimmedQuery : "top stories";
+  const sourceCountry = edition.code.toUpperCase();
+  const params = new URLSearchParams({
+    query: `"${query}" OR ${sourceCountry === "IN" ? "India" : sourceCountry}`,
+    mode: "ArtList",
+    format: "json",
+    maxrecords: String(Math.min(50, limit * 2)),
+    sort: "DateDesc",
+    timespan: "1d",
+  });
+  const fetched = await relayJson<Record<string, unknown>>(
+    `https://api.gdeltproject.org/api/v2/doc/doc?${params.toString()}`,
+    { timeoutMs: 10_000, signal: options.signal },
+  );
+  if (!isRelayOk(fetched)) {
+    return { articles: [], via: "none", error: fetched.error };
+  }
+  const rows = (fetched.data as { articles?: Array<Record<string, unknown>> })
+    ?.articles;
+  if (!Array.isArray(rows)) {
+    return { articles: [], via: "none", error: "unexpected GDELT shape" };
+  }
+  const articles: ArticleItem[] = [];
+  for (const row of rows.slice(0, limit)) {
+    const url = String(row.url ?? "");
+    const title = String(row.title ?? "").trim();
+    if (!/^https?:\/\//.test(url) || title.length < 8) {
+      continue;
+    }
+    let seen: number | undefined;
+    const seendate = String(row.seendate ?? "");
+    const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(seendate);
+    if (m) {
+      seen = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`);
+    }
+    articles.push({
+      id: newId("gd"),
+      title,
+      url,
+      domain: String(row.domain ?? hostOf(url)),
+      source: String(row.domain ?? hostOf(url)),
+      publishedAt: seen,
+      imageUrl: typeof row.socialimage === "string" ? row.socialimage : undefined,
+      country: edition.code,
+      language: edition.hl.split("-")[0],
+    });
+  }
+  if (articles.length === 0) {
+    return { articles: [], via: fetched.via, error: "no GDELT rows" };
+  }
+  return { articles, via: fetched.via };
+}
+
+/**
+ * The news ask answers from whichever engine gets there with content — all
+ * three run at the same time, so a blocked feed costs zero extra seconds.
+ * Google's own feed wins on a tie: it carries the truest per-story dates.
+ */
+export async function googleNews(options: {
+  topic?: NewsTopic;
+  query?: string;
+  countryCode?: string;
+  place?: NewsPlace;
+  limit?: number;
+  signal?: AbortSignal;
+}): Promise<GoogleNewsResult & { error?: string }> {
+  const edition =
+    editionByCode(options.countryCode ?? options.place?.country) ??
+    editionByCode("world");
+  if (!edition) {
+    return {
+      articles: [],
+      edition: editionByCode("world")!,
+      via: "none",
+      error: "no edition",
+    };
+  }
+  const limit = options.limit ?? 24;
+
+  const [google, bing, gdelt] = await Promise.all([
+    fetchGoogleFeed(
+      {
+        topic: options.topic,
+        query: options.query,
+        place: options.place,
+        signal: options.signal,
+      },
+      edition,
+      limit,
+    ),
+    bingNewsSearch({
+      query: options.query,
+      countryCode: options.countryCode ?? options.place?.country,
+      limit,
+      signal: options.signal,
+    }).then((result) => ({ ...result, error: result.error })),
+    fetchGdeltNews(
+      {
+        query: options.query,
+        countryCode: options.countryCode ?? options.place?.country,
+        signal: options.signal,
+      },
+      edition,
+      limit,
+    ),
+  ]);
+
+  type EngineKey = "google" | "gdelt" | "bing";
+  const rawCandidates: Array<{ engine: EngineKey; result: NewsEngineResult }> = [
+    { engine: "google", result: google },
+    { engine: "gdelt", result: gdelt },
+    { engine: "bing", result: bing },
+  ];
+  rawCandidates.sort((a, b) => b.result.articles.length - a.result.articles.length);
+  const candidates = rawCandidates;
+
+  const winner =
+    candidates.find((candidate) => candidate.result.articles.length > 0) ??
+    candidates[0];
 
   return {
-    articles: deduped,
+    articles: winner.result.articles,
     edition,
-    via: fetched.via,
+    via: winner.result.via,
+    engine: winner.engine,
     placeLabel: options.place ? labelForPlace(options.place) : undefined,
+    error:
+      winner.result.articles.length > 0
+        ? undefined
+        : [google.error, bing.error, gdelt.error].filter(Boolean).join(" · ") ||
+          "all news engines returned no items",
   };
 }
 
@@ -253,4 +396,67 @@ function labelForPlace(place: NewsPlace): string {
     parts.push(place.region);
   }
   return parts.join(" · ");
+}
+
+/**
+ * Bing News RSS — the second engine. When Google's feed will not come through
+ * (blocked relay, rate limit, captive portal), the news ask still answers from
+ * here instead of dying. Same discipline: real publisher links, real dates.
+ */
+export async function bingNewsSearch(options: {
+  query?: string;
+  countryCode?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}): Promise<{ articles: ArticleItem[]; via: string; error?: string }> {
+  const edition = editionByCode(options.countryCode ?? "") ?? editionByCode("world");
+  const market = edition?.gl ?? "IN";
+  const base = options.query?.trim()
+    ? `https://www.bing.com/news/search?q=${encodeURIComponent(options.query.trim())}`
+    : "https://www.bing.com/news/search?q=top+stories";
+  const url = `${base}&format=RSS&setmkt=${market === "IN" ? "en-IN" : `en-${market}`}`;
+
+  const fetched = await relayText(url, {
+    accept: "application/rss+xml, application/xml, text/xml, */*",
+    skipDirect: true,
+    timeoutMs: 10_000,
+    signal: options.signal,
+  });
+  if (!isRelayOk(fetched)) {
+    return { articles: [], via: "none", error: fetched.error };
+  }
+  if (!/<rss|<item/i.test(fetched.data)) {
+    return { articles: [], via: fetched.via, error: "the response was not a news feed" };
+  }
+
+  const articles: ArticleItem[] = parseItems(fetched.data)
+    .map((item) => {
+      const { headline, source } = splitTitle(item.title, item.sourceName);
+      const realUrl =
+        item.articleUrl && /^https?:\/\//.test(item.articleUrl)
+          ? item.articleUrl
+          : item.link;
+      const domain = realUrl ? hostOf(realUrl) : "bing.com";
+      return {
+        id: newId("bn"),
+        title: headline,
+        url: realUrl || item.link,
+        domain,
+        source: source ?? domain,
+        snippet: stripTags(decodeEntities(item.description)).slice(0, 280) || undefined,
+        publishedAt: item.pubDate,
+        imageUrl: item.imageUrl,
+        country: edition?.code,
+        language: edition?.hl.split("-")[0] ?? "en",
+      } satisfies ArticleItem;
+    })
+    .filter((article) => article.title.length > 2 && /^https?:\/\//.test(article.url));
+
+  const deduped = Array.from(
+    new Map(articles.map((article) => [article.url, article])).values(),
+  )
+    .sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
+    .slice(0, options.limit ?? 24);
+
+  return { articles: deduped, via: fetched.via };
 }

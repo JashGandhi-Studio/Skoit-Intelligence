@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea, Tab, TabContent, TabList, Tabs } from "@/components/ui/misc";
+import { Tab, TabContent, TabList, Tabs } from "@/components/ui/misc";
 import type { TurnView } from "@/lib/client/cases";
 import { cn, formatClock } from "@/lib/utils";
 
@@ -185,7 +185,7 @@ export function IntelPanel({
         </TabList>
 
         <TabContent value="findings">
-          <ScrollArea className="h-full">
+          <div className="thin-scroll h-full overflow-y-auto">
             {findings.length === 0 ? (
               <EmptyIntel hint="Findings appear here as each skill reports. Every entry is evidence with a source, a confidence level and, where relevant, a severity." />
             ) : (
@@ -223,11 +223,11 @@ export function IntelPanel({
                 ))}
               </ul>
             )}
-          </ScrollArea>
+          </div>
         </TabContent>
 
         <TabContent value="entities">
-          <ScrollArea className="h-full">
+          <div className="thin-scroll h-full overflow-y-auto">
             {entities.length === 0 ? (
               <EmptyIntel hint="Anything the sources surfaced that is worth pivoting on — subdomains, addresses, handles, dates — is grouped here." />
             ) : (
@@ -267,11 +267,11 @@ export function IntelPanel({
                 ))}
               </ul>
             )}
-          </ScrollArea>
+          </div>
         </TabContent>
 
         <TabContent value="sources">
-          <ScrollArea className="h-full">
+          <div className="thin-scroll h-full overflow-y-auto">
             {sources.length === 0 ? (
               <EmptyIntel hint="Every consulted source is listed with the time it was accessed, whether it succeeded or not. Unreachable sources stay visible here." />
             ) : (
@@ -313,7 +313,7 @@ export function IntelPanel({
                 ))}
               </ul>
             )}
-          </ScrollArea>
+          </div>
         </TabContent>
       </Tabs>
 

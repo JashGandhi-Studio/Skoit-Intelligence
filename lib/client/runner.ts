@@ -42,6 +42,26 @@ export function browserContext(onLog?: (message: string) => void): NetContext {
  * a sandboxed deployment) — the analyst's own browser becomes the collection
  * path, restricted to skills that talk to CORS-enabled public endpoints.
  */
+/** Runs async jobs with a concurrency ceiling, preserving input order. */
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  job: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        await job(items[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+}
+
 export async function runClientPass(
   request: AgentRequest,
   options: {
@@ -86,14 +106,25 @@ export async function runClientPass(
   const media: NonNullable<AnalysisBundle["media"]> = [];
   const articles: NonNullable<AnalysisBundle["articles"]> = [];
 
-  for (const step of steps) {
+  // The browser pass collects with the same bounded concurrency as the server
+  // pass — sequential execution here was multiplying every relay timeout.
+  /** Same per-skill wall-clock budget as the server pass. */
+  const CLIENT_STEP_TIMEOUT_MS = 18_000;
+
+  const runClientStep = async (step: (typeof steps)[number]) => {
     if (signal.aborted) {
-      break;
+      return;
     }
     const skill = getSkill(step.skillId);
     if (!skill) {
-      continue;
+      return;
     }
+    // Bound each browser skill: its internal fetches already time out, but a
+    // slow chain of them must not hold the whole pass open.
+    const stepAbort = new AbortController();
+    const stepTimer = setTimeout(() => stepAbort.abort(), CLIENT_STEP_TIMEOUT_MS);
+    const outerAbort = () => stepAbort.abort();
+    signal.addEventListener("abort", outerAbort, { once: true });
     const localStep: PlannedStep = {
       ...step,
       id:
@@ -130,20 +161,32 @@ export async function runClientPass(
             return Object.keys(meta).length > 0 ? meta : undefined;
           })(),
         },
-        ctx,
+        { ...ctx, signal: stepAbort.signal },
       );
     } catch (error) {
-      outcome = {
-        status: "error",
-        summary: "Browser-side skill failed.",
-        evidence: [],
-        entities: [],
-        sources: [],
-        error: {
-          code: "unknown",
-          message: error instanceof Error ? error.message : String(error),
-        },
-      };
+      outcome = stepAbort.signal.aborted
+        ? {
+            status: "unreachable",
+            summary: `The skill exceeded the ${CLIENT_STEP_TIMEOUT_MS / 1000}s browser budget.`,
+            evidence: [],
+            entities: [],
+            sources: [],
+            error: { code: "timeout", message: "browser pass budget exceeded" },
+          }
+        : {
+            status: "error",
+            summary: "Browser-side skill failed.",
+            evidence: [],
+            entities: [],
+            sources: [],
+            error: {
+              code: "unknown",
+              message: error instanceof Error ? error.message : String(error),
+            },
+          };
+    } finally {
+      clearTimeout(stepTimer);
+      signal.removeEventListener("abort", outerAbort);
     }
 
     localStep.status = outcome.status;
@@ -180,7 +223,9 @@ export async function runClientPass(
       media: outcome.media,
       articles: outcome.articles,
     });
-  }
+  };
+
+  await mapWithConcurrency(steps, 3, runClientStep);
 
   const bundle: AnalysisBundle = {
     question: request.message,

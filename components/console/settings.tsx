@@ -28,6 +28,14 @@ import { mergePreferences } from "@/lib/preferences";
 import type { AnswerPreferences } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+const PROVIDER_KEY_LINKS: Record<string, string> = {
+  SARVAM_API_KEY: "https://dashboard.sarvam.ai",
+  OPENAI_API_KEY: "https://platform.openai.com/api-keys",
+  ANTHROPIC_API_KEY: "https://console.anthropic.com/settings/keys",
+  GOOGLE_GENERATIVE_AI_API_KEY: "https://aistudio.google.com/app/apikey",
+  COMPATIBLE_API_KEY: "https://ollama.com/download",
+};
+
 interface KeyRow {
   key: string;
   configured: boolean;
@@ -155,7 +163,7 @@ const AI_COPY: Array<{
   {
     key: "auto",
     label: "Best available model",
-    hint: "Your own key if you have one; otherwise the free in-browser model (Puter.js) writes over the same evidence. Neither → built-in writer, and it says so.",
+    hint: "Your own key if you have one; otherwise the SkOiT Model (SkOiT Intelligence, in-browser, no key) writes over the same evidence. Neither → built-in writer, and it says so.",
     icon: Sparkles,
   },
   {
@@ -712,6 +720,16 @@ export function SettingsDialog({
                     <p className="mt-0.5 text-[11.5px] text-muted-foreground">
                       {provider.model} · needs {provider.envVar}
                     </p>
+                    {!provider.configured && PROVIDER_KEY_LINKS[provider.envVar] ? (
+                      <a
+                        href={PROVIDER_KEY_LINKS[provider.envVar]}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-block text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        Get an official key ↗
+                      </a>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
                     {provider.configured ? (

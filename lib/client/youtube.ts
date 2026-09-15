@@ -29,12 +29,17 @@ const PIPED_INSTANCES = [
   "https://pipedapi.adminforge.de",
   "https://api.piped.private.coffee",
   "https://pipedapi.drgns.space",
+  "https://pipedapi.reallyaweso.me",
+  "https://api.piped.yt",
 ];
 
 const INVIDIOUS_INSTANCES = [
   "https://inv.nadeko.net",
   "https://invidious.nerdvpn.de",
-  "https://invidious.jing.rocks",
+  "https://yewtu.be",
+  "https://invidious.f5.si",
+  "https://invidious.privacyredirect.com",
+  "https://iv.datura.network",
 ];
 
 function parseDuration(value: unknown): number | undefined {
@@ -64,87 +69,114 @@ function decodeEntities(value: string): string {
     .replace(/&gt;/g, ">");
 }
 
+interface MirrorResult {
+  via: string;
+  hits: VideoHit[];
+}
+
+function parsePipedItem(item: Record<string, unknown>): VideoHit | undefined {
+  const url = String(item.url ?? "");
+  const id = /(?:v=|\/)([\w-]{11})/.exec(url)?.[1] ?? String(item.id ?? "");
+  if (!/[\w-]{11}/.test(id)) {
+    return undefined;
+  }
+  return {
+    videoId: id,
+    title: decodeEntities(String(item.title ?? "")),
+    author: item.uploaderName ? String(item.uploaderName) : undefined,
+    durationSec: parseDuration(item.duration),
+    views: typeof item.views === "number" ? item.views : undefined,
+    published: item.uploadedDate ? String(item.uploadedDate) : undefined,
+    thumbnailUrl: item.thumbnail ? String(item.thumbnail) : undefined,
+  };
+}
+
+function parseInvidiousItem(item: Record<string, unknown>): VideoHit | undefined {
+  const id = String(item.videoId ?? "");
+  if (!/[\w-]{11}/.test(id)) {
+    return undefined;
+  }
+  const thumbs = item.videoThumbnails as Array<{ url?: string }> | undefined;
+  return {
+    videoId: id,
+    title: decodeEntities(String(item.title ?? "")),
+    author: item.author ? String(item.author) : undefined,
+    durationSec: parseDuration(item.lengthSeconds),
+    views: typeof item.viewCount === "number" ? item.viewCount : undefined,
+    published: item.publishedText ? String(item.publishedText) : undefined,
+    thumbnailUrl:
+      thumbs?.find((thumb) => /hqdefault|mqdefault/.test(String(thumb.url ?? "")))?.url ??
+      `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+  };
+}
+
+/** Ask every mirror of a family at once; the first useful answer wins. */
+async function raceMirrors(
+  builds: Array<{ via: string; url: string; parse: (data: unknown) => VideoHit[] }>,
+  signal?: AbortSignal,
+): Promise<MirrorResult | undefined> {
+  const attempts = builds.map(async (build): Promise<MirrorResult> => {
+    const fetched = await relayJson<unknown>(build.url, {
+      timeoutMs: 8_000,
+      signal,
+      skipDirect: true,
+    });
+    if (!isRelayOk(fetched)) {
+      throw new Error(fetched.error);
+    }
+    const hits = build.parse(fetched.data).filter((hit): hit is VideoHit => Boolean(hit));
+    if (hits.length === 0) {
+      throw new Error("empty");
+    }
+    return { via: build.via, hits };
+  });
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    return undefined;
+  }
+}
+
+
+
 async function viaPiped(
   query: string,
   signal?: AbortSignal,
 ): Promise<VideoHit[] | undefined> {
-  for (const base of PIPED_INSTANCES) {
-    try {
-      const fetched = await relayJson<{ items?: Array<Record<string, unknown>> }>(
-        `${base}/search?q=${encodeURIComponent(query)}&filter=videos`,
-        { timeoutMs: 7_000, signal },
-      );
-      if (isRelayOk(fetched) && Array.isArray(fetched.data.items)) {
-        const hits = fetched.data.items
-          .map((item): VideoHit | undefined => {
-            const url = String(item.url ?? "");
-            const id = /(?:v=|\/)([\w-]{11})/.exec(url)?.[1] ?? String(item.id ?? "");
-            if (!/[\w-]{11}/.test(id)) {
-              return undefined;
-            }
-            return {
-              videoId: id,
-              title: decodeEntities(String(item.title ?? "")),
-              author: item.uploaderName ? String(item.uploaderName) : undefined,
-              durationSec: parseDuration(item.duration),
-              views: typeof item.views === "number" ? item.views : undefined,
-              published: item.uploadedDate ? String(item.uploadedDate) : undefined,
-              thumbnailUrl: item.thumbnail ? String(item.thumbnail) : undefined,
-            } satisfies VideoHit;
-          })
-          .filter((hit): hit is VideoHit => Boolean(hit));
-        if (hits.length > 0) {
-          return hits;
-        }
-      }
-    } catch {
-      /* next mirror */
-    }
-  }
-  return undefined;
+  const winner = await raceMirrors(
+    PIPED_INSTANCES.map((base) => ({
+      via: `piped (${new URL(base).hostname})`,
+      url: `${base}/search?q=${encodeURIComponent(query)}&filter=videos`,
+      parse: (data: unknown) => {
+        const items = (data as { items?: Array<Record<string, unknown>> }).items;
+        return Array.isArray(items)
+          ? items.map(parsePipedItem).filter((hit): hit is VideoHit => Boolean(hit))
+          : [];
+      },
+    })),
+    signal,
+  );
+  return winner?.hits;
 }
 
 async function viaInvidious(
   query: string,
   signal?: AbortSignal,
 ): Promise<VideoHit[] | undefined> {
-  for (const base of INVIDIOUS_INSTANCES) {
-    try {
-      const fetched = await relayJson<Array<Record<string, unknown>>>(
-        `${base}/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance`,
-        { timeoutMs: 7_000, signal },
-      );
-      if (isRelayOk(fetched) && Array.isArray(fetched.data)) {
-        const hits = fetched.data
-          .map((item): VideoHit | undefined => {
-            const id = String(item.videoId ?? "");
-            if (!/[\w-]{11}/.test(id)) {
-              return undefined;
-            }
-            const thumbs = item.videoThumbnails as Array<{ url?: string }> | undefined;
-            return {
-              videoId: id,
-              title: decodeEntities(String(item.title ?? "")),
-              author: item.author ? String(item.author) : undefined,
-              durationSec: parseDuration(item.lengthSeconds),
-              views: typeof item.viewCount === "number" ? item.viewCount : undefined,
-              published: item.publishedText ? String(item.publishedText) : undefined,
-              thumbnailUrl:
-                thumbs?.find((thumb) =>
-                  /hqdefault|mqdefault/.test(String(thumb.url ?? "")),
-                )?.url ?? `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
-            } satisfies VideoHit;
-          })
-          .filter((hit): hit is VideoHit => Boolean(hit));
-        if (hits.length > 0) {
-          return hits;
-        }
-      }
-    } catch {
-      /* next mirror */
-    }
-  }
-  return undefined;
+  const winner = await raceMirrors(
+    INVIDIOUS_INSTANCES.map((base) => ({
+      via: `invidious (${new URL(base).hostname})`,
+      url: `${base}/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance`,
+      parse: (data: unknown) =>
+        Array.isArray(data)
+          ? (data as Array<Record<string, unknown>>)
+              .map(parseInvidiousItem)
+              .filter((hit): hit is VideoHit => Boolean(hit))
+          : [],
+    })),
+    signal,
+  );
+  return winner?.hits;
 }
 
 /** Last resort: the results page itself, parsed for its embedded JSON. */
@@ -155,8 +187,10 @@ async function viaYoutubePage(
   const fetched = await relayText(
     `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&hl=en&gl=IN`,
     {
+      // youtube.com never sends CORS headers, so the browser skips the direct
+      // attempt; on the server "direct" is the only route and works.
       skipDirect: true,
-      timeoutMs: 18_000,
+      timeoutMs: 12_000,
       signal,
     },
   );
@@ -225,4 +259,20 @@ export async function youtubeSearch(
   errors.push("youtube page unreachable");
 
   return { hits: [], via: "none", error: errors.join(" · ") };
+}
+
+/**
+ * Candidate routes for saving a YouTube video locally. Invidious mirrors can
+ * hand over a direct MP4 stream (itag 18); when none of them answer, the
+ * caller falls back to the console's download proxy and finally to opening
+ * the source page. Nothing here decrypts or strips DRM — it is the same
+ * public stream the player shows.
+ */
+export function youtubeDownloadCandidates(videoId: string): string[] {
+  const routes: string[] = [];
+  for (const base of INVIDIOUS_INSTANCES) {
+    routes.push(`${base}/latest_version?id=${encodeURIComponent(videoId)}&itag=18`);
+  }
+  routes.push(`https://www.youtube.com/watch?v=${videoId}`);
+  return routes;
 }

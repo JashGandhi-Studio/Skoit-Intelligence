@@ -1389,12 +1389,130 @@ function licenceRow(
     );
 }
 
+/* -------------------------------------------------- museum open access -- */
+
+const MET_SOURCE = source(
+  "met-museum",
+  "Met Museum Open Access",
+  "https://www.metmuseum.org/about-the-met/policies-and-documents/open-access",
+  "dataset",
+);
+const AIC_SOURCE = source(
+  "artic",
+  "Art Institute of Chicago",
+  "https://www.artic.edu/open-access",
+  "dataset",
+);
+
+/**
+ * Two museum open-access collections, keyless and CORS-open: the Metropolitan
+ * Museum of Art and the Art Institute of Chicago. They only contribute
+ * public-domain / CC0 imagery, so they are safe under either licence setting.
+ */
+async function museumSearch(
+  query: string,
+  limit: number,
+  ctx: NetContext,
+): Promise<{ items: MediaItem[]; error?: string }> {
+  const items: MediaItem[] = [];
+  const failures: string[] = [];
+
+  const met = (async () => {
+    const search = await request<{ objectIDs?: number[] | null }>(
+      `https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&q=${encodeURIComponent(query)}`,
+      ctx,
+      { timeoutMs: 8000 },
+    );
+    const ids = (search.ok ? (search.data.objectIDs ?? []) : []).slice(
+      0,
+      Math.min(limit, 10),
+    );
+    const objects = await Promise.all(
+      ids.map((id) =>
+        request<{
+          primaryImageSmall?: string;
+          title?: string;
+          artistDisplayName?: string;
+          isPublicDomain?: boolean;
+          objectURL?: string;
+          objectDate?: string;
+        }>(
+          `https://collectionapi.metmuseum.org/public/collection/v1/objects/${id}`,
+          ctx,
+          { timeoutMs: 8000 },
+        ).then((result) => (result.ok ? result.data : null)),
+      ),
+    );
+    for (const object of objects) {
+      if (!object?.primaryImageSmall || object.isPublicDomain !== true) {
+        continue;
+      }
+      items.push(
+        mediaItem({
+          kind: "image",
+          title: truncate(object.title || "Untitled (Met Museum)", 120),
+          url: object.primaryImageSmall,
+          pageUrl: object.objectURL,
+          thumbnailUrl: object.primaryImageSmall,
+          source: "Met Museum",
+          sourceId: "met-museum",
+          author: object.artistDisplayName || undefined,
+          licence: "Public domain (Met Open Access)",
+          query,
+        }),
+      );
+    }
+  })().catch(() => failures.push("Met Museum: unreachable"));
+
+  const aic = (async () => {
+    const found = await request<{
+      data?: Array<{
+        id: number;
+        title?: string;
+        artist_title?: string;
+        image_id?: string;
+        is_public_domain?: boolean;
+        api_link?: string;
+      }>;
+    }>(
+      `https://api.artic.edu/api/v1/artworks/search?q=${encodeURIComponent(query)}&limit=${Math.min(limit, 10)}&fields=id,title,artist_title,image_id,is_public_domain,api_link`,
+      ctx,
+      { timeoutMs: 8000 },
+    );
+    for (const row of (found.ok ? found.data.data : undefined) ?? []) {
+      if (!row.image_id || row.is_public_domain === false) {
+        continue;
+      }
+      items.push(
+        mediaItem({
+          kind: "image",
+          title: truncate(row.title || "Untitled (Art Institute of Chicago)", 120),
+          url: `https://www.artic.edu/iiif/2/${row.image_id}/full/843,/0/default.jpg`,
+          pageUrl: row.api_link,
+          thumbnailUrl: `https://www.artic.edu/iiif/2/${row.image_id}/full/400,/0/default.jpg`,
+          source: "Art Institute of Chicago",
+          sourceId: "artic",
+          author: row.artist_title || undefined,
+          licence: row.is_public_domain ? "Public domain" : "CC 0 (AIC)",
+          query,
+        }),
+      );
+    }
+  })().catch(() => failures.push("Art Institute of Chicago: unreachable"));
+
+  await Promise.all([met, aic]);
+  return {
+    items,
+    error: failures.length > 0 && items.length === 0 ? failures.join(" · ") : undefined,
+  };
+}
+
 export const imageSearch: SkillDefinition = {
   id: "image-search",
   name: "Image finder",
   short: "Images",
   description:
-    "Finds reusable images for a topic — Wikimedia Commons, Openverse and NASA without a key, Pexels, Pixabay and Unsplash when keyed — and returns direct file URLs with author and licence.",
+    "Finds reusable images for a topic — Wikimedia Commons, Openverse, NASA and two museum open-access collections without a key, Pexels, Pixabay and Unsplash when keyed — and returns direct file URLs with author and licence.",
   category: "retrieval",
   runtime: "live",
   accepts: ["text"],
@@ -1409,24 +1527,31 @@ export const imageSearch: SkillDefinition = {
     const language = target.meta?.language;
     ctx.log(`Searching image sources for “${query}”`);
 
-    const sources: SourceRef[] = [commonsSource(), openverseSource(), nasaSource()];
+    const sources: SourceRef[] = [
+      commonsSource(),
+      openverseSource(),
+      nasaSource(),
+      MET_SOURCE,
+      AIC_SOURCE,
+    ];
     const failures: string[] = [];
     const items: MediaItem[] = [];
 
-    const commons = await commonsSearch(query, "image", limit, ctx);
-    items.push(...commons.items);
+    // Every library is asked at once — the skill finishes with its slowest
+    // source, not the sum of all of them.
+    const [commons, openverse, nasa, museums] = await Promise.all([
+      commonsSearch(query, "image", limit, ctx),
+      openverseSearch(query, limit, reusable, language, ctx),
+      nasaSearch(query, "image", Math.min(6, limit), ctx),
+      museumSearch(query, limit, ctx),
+    ]);
+    items.push(...commons.items, ...openverse.items, ...nasa.items, ...museums.items);
     if (commons.error) {
       failures.push(`Wikimedia Commons: ${commons.error}`);
     }
-
-    const openverse = await openverseSearch(query, limit, reusable, language, ctx);
-    items.push(...openverse.items);
     if (openverse.error) {
       failures.push(`Openverse: ${openverse.error}`);
     }
-
-    const nasa = await nasaSearch(query, "image", Math.min(6, limit), ctx);
-    items.push(...nasa.items);
     if (nasa.error) {
       failures.push(`NASA: ${nasa.error}`);
     }
@@ -1560,20 +1685,19 @@ export const videoSearch: SkillDefinition = {
     const failures: string[] = [];
     const items: MediaItem[] = [];
 
-    const commons = await commonsSearch(query, "video", limit, ctx);
-    items.push(...commons.items);
+    // Asked together: the skill costs one source latency, not five.
+    const [commons, archive, nasa] = await Promise.all([
+      commonsSearch(query, "video", limit, ctx),
+      archiveVideoSearch(query, limit, ctx),
+      nasaSearch(query, "video", Math.min(5, limit), ctx),
+    ]);
+    items.push(...commons.items, ...archive.items, ...nasa.items);
     if (commons.error) {
       failures.push(`Wikimedia Commons: ${commons.error}`);
     }
-
-    const archive = await archiveVideoSearch(query, limit, ctx);
-    items.push(...archive.items);
     if (archive.error) {
       failures.push(`Internet Archive: ${archive.error}`);
     }
-
-    const nasa = await nasaSearch(query, "video", Math.min(5, limit), ctx);
-    items.push(...nasa.items);
     if (nasa.error) {
       failures.push(`NASA: ${nasa.error}`);
     }
@@ -1607,9 +1731,22 @@ export const videoSearch: SkillDefinition = {
             ),
         )
       : items;
-    const deduped = Array.from(
+    let deduped = Array.from(
       new Map(filtered.map((item) => [item.url, item])).values(),
     );
+
+    // B-roll, reels and social clips are intentionally short-form requests.
+    // Never answer one with a feature-length or lecture-sized asset: prefer
+    // clips under 30 seconds, then under 90 seconds, and only fall back to a
+    // longer item when no short source exists.
+    const shortForm = /\b(?:b[ -]?roll|reels?|short(?:s)?|social clip|instagram|tiktok)\b/i.test(query);
+    if (shortForm) {
+      const short = deduped.filter((item) => (item.durationMs ?? 0) > 0 && (item.durationMs ?? 0) <= 90_000);
+      if (short.length > 0) {
+        deduped = short;
+      }
+      deduped.sort((a, b) => (a.durationMs ?? Number.MAX_SAFE_INTEGER) - (b.durationMs ?? Number.MAX_SAFE_INTEGER));
+    }
     const totalMinutes = deduped.reduce(
       (total, item) => total + (item.durationMs ?? 0) / 60000,
       0,
@@ -1681,20 +1818,18 @@ export const newsSearch: SkillDefinition = {
     const failures: string[] = [];
     const articles: ArticleItem[] = [];
 
-    const gdelt = await gdeltSearch(query, limit, { language, region, timespan }, ctx);
-    articles.push(...gdelt.items);
+    const [gdelt, hn, wiki] = await Promise.all([
+      gdeltSearch(query, limit, { language, region, timespan }, ctx),
+      hnSearch(query, Math.min(8, limit), ctx),
+      wikipediaContext(query, language, ctx),
+    ]);
+    articles.push(...gdelt.items, ...hn.items, ...wiki.items);
     if (gdelt.error) {
       failures.push(`GDELT: ${gdelt.error}`);
     }
-
-    const hn = await hnSearch(query, Math.min(8, limit), ctx);
-    articles.push(...hn.items);
     if (hn.error) {
       failures.push(`Hacker News: ${hn.error}`);
     }
-
-    const wiki = await wikipediaContext(query, language, ctx);
-    articles.push(...wiki.items);
     if (wiki.error) {
       failures.push(`Wikipedia: ${wiki.error}`);
     }
@@ -2439,28 +2574,34 @@ export const audioSearch: SkillDefinition = {
     const jamendoKey = ctx.env("JAMENDO_CLIENT_ID");
     const failures: string[] = [];
     const items: MediaItem[] = [];
-    let previews = 0;
 
-    const archive = await archiveAudioSearch(query, limit, ctx);
-    items.push(...archive.items);
+    // Every audio library is asked at once — this used to run six fetches in
+    // a row (up to a minute of wall time), which blew the skill's budget and
+    // made audio feel dead. In parallel it costs one fetch, not six.
+    const [archive, commons, openverse, jamendo, itunes, deezer] = await Promise.all([
+      archiveAudioSearch(query, limit, ctx),
+      commonsSearch(query, "audio", limit, ctx),
+      openverseAudioSearch(query, limit, reusable, ctx),
+      jamendoKey
+        ? jamendoSearch(query, limit, jamendoKey, ctx)
+        : Promise.resolve(null),
+      itunesSearch(query, limit, ctx),
+      deezerSearch(query, limit, ctx),
+    ]);
+
+    items.push(...archive.items, ...commons.items, ...openverse.items);
     if (archive.error) {
       failures.push(`Internet Archive: ${archive.error}`);
     }
-
-    const commons = await commonsSearch(query, "audio", limit, ctx);
-    items.push(...commons.items);
     if (commons.error) {
       failures.push(`Wikimedia Commons: ${commons.error}`);
     }
-
-    const openverse = await openverseAudioSearch(query, limit, reusable, ctx);
-    items.push(...openverse.items);
     if (openverse.error) {
       failures.push(`Openverse: ${openverse.error}`);
     }
 
-    if (jamendoKey) {
-      const jamendo = await jamendoSearch(query, limit, jamendoKey, ctx);
+    let previews = 0;
+    if (jamendo) {
       items.push(...jamendo.items);
       if (jamendo.error) {
         failures.push(`Jamendo: ${jamendo.error}`);
@@ -2470,15 +2611,11 @@ export const audioSearch: SkillDefinition = {
         );
       }
     }
-
-    const itunes = await itunesSearch(query, limit, ctx);
     items.push(...itunes.items);
     previews += itunes.items.length;
     if (itunes.error) {
       failures.push(`Apple Music catalog: ${itunes.error}`);
     }
-
-    const deezer = await deezerSearch(query, limit, ctx);
     items.push(...deezer.items);
     previews += deezer.items.length;
     if (deezer.error) {

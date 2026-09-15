@@ -49,3 +49,7 @@ yarn-error.log*
 
 # typescript incremental build cache
 *.tsbuildinfo
+
+# npm artifacts — the repo is pnpm-managed
+package-lock.json
+node_modules/

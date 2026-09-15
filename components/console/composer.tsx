@@ -25,6 +25,22 @@ import { detectTargets, targetLabel } from "@/lib/skills/identify";
 import type { AttachmentPayload, SkillCategory } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+const SKILL_PROMPTS: Record<string, [string, string]> = {
+  "image-search": ["Find travel photos of Goa at sunset", "Find reusable images of Mumbai local trains"],
+  "video-search": ["Find short travel B-roll of beaches", "Find 10-second city clips for Instagram"],
+  "audio-search": ["Find calm travel music", "Find downloadable rain ambience"],
+  "news-search": ["Latest news about space research", "Mumbai news today"],
+  "currency-convert": ["Convert 100 dollars to rupees", "Convert 50 EUR to INR"],
+  "paper-search": ["Find the latest ICSE physics paper", "Find 2027 papers about electricity"],
+  "domain-posture": ["Check example.com security", "Find subdomains of example.com"],
+};
+
+function promptsForSkill(skill: SkillManifestEntry): [string, string] {
+  if (SKILL_PROMPTS[skill.id]) return SKILL_PROMPTS[skill.id];
+  const noun = skill.name.toLowerCase();
+  return [`Try ${noun}: give me a focused result`, `Use ${noun} for this topic: travel in Mumbai`];
+}
+
 const CATEGORY_LABEL: Record<SkillCategory, string> = {
   network: "Network",
   infrastructure: "Infrastructure",
@@ -49,12 +65,15 @@ export function Composer({
   busy,
   manifest,
   className,
+  onPreviewFile,
 }: {
   onSubmit: (submission: ComposerSubmission) => void;
   onStop: () => void;
   busy: boolean;
   manifest: SkillManifestEntry[];
   className?: string;
+  /** Tap an attached file to open it in the viewer. */
+  onPreviewFile?: (file: { name: string; type?: string; previewUrl?: string }) => void;
 }) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<
@@ -153,19 +172,32 @@ export function Composer({
                 key={file.name}
                 className="group flex items-center gap-2 rounded-lg border border-hairline bg-surface-2 py-1 pr-1 pl-1.5"
               >
-                {file.previewUrl ? (
-                  // biome-ignore lint/performance/noImgElement: local blob preview of the analyst's own file
-                  <img
-                    src={file.previewUrl}
-                    alt={`Preview of ${file.name}`}
-                    className="size-7 rounded object-cover"
-                  />
-                ) : (
-                  <Paperclip className="size-3.5 text-faint-foreground" />
-                )}
-                <span className="max-w-[150px] truncate text-[11.5px] text-foreground">
-                  {file.name}
-                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onPreviewFile?.({
+                      name: file.name,
+                      type: file.type,
+                      previewUrl: file.previewUrl,
+                    })
+                  }
+                  className="flex min-w-0 items-center gap-2"
+                  aria-label={`Open ${file.name} in the viewer`}
+                >
+                  {file.previewUrl && file.type?.startsWith("image/") ? (
+                    // biome-ignore lint/performance/noImgElement: local blob preview of the analyst's own file
+                    <img
+                      src={file.previewUrl}
+                      alt={`Preview of ${file.name}`}
+                      className="size-7 rounded object-cover"
+                    />
+                  ) : (
+                    <Paperclip className="size-3.5 text-faint-foreground" />
+                  )}
+                  <span className="max-w-[150px] truncate text-[11.5px] text-foreground underline-offset-2 group-hover:underline">
+                    {file.name}
+                  </span>
+                </button>
                 {file.coordinates ? (
                   <Badge tone="warning" mono>
                     gps
@@ -218,11 +250,14 @@ export function Composer({
               ref={fileRef}
               type="file"
               multiple
-              accept="image/*,text/*,.json,.csv,.log,.md,.eml,.pdf"
+              // Every format is welcome — mp3, mp4, png, pdf, zip, anything.
+              // The heavy analysis (EXIF, documents) adapts to what arrives;
+              // whatever it is, it can be attached and opened in the viewer.
+              accept="*/*"
               className="hidden"
               onChange={(event) => handleFiles(event.target.files)}
             />
-            <Tip label="Attach a file — EXIF, hashes and entropy are read locally in this browser">
+            <Tip label="Attach any file — EXIF, hashes and entropy are read locally in this browser">
               <Button
                 variant="ghost"
                 size="icon"
@@ -306,7 +341,9 @@ export function Composer({
                       <div className="grid gap-1.5">
                         {skills.map((skill) => {
                           const selected = manualSkills.includes(skill.id);
+                          const example = promptsForSkill(skill);
                           return (
+                            <div key={skill.id}>
                             <button
                               key={skill.id}
                               type="button"
@@ -354,6 +391,16 @@ export function Composer({
                                 </span>
                               </span>
                             </button>
+                            {selected && example ? (
+                              <div className="mt-1 flex flex-wrap gap-1 pl-6">
+                                {example.map((prompt) => (
+                                  <button key={prompt} type="button" className="rounded-md border border-primary/25 px-1.5 py-1 text-[10.5px] text-primary hover:bg-primary-soft" onClick={() => { setValue(prompt); setPickerOpen(false); }}>
+                                    Try: {prompt}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                            </div>
                           );
                         })}
                       </div>

@@ -61,7 +61,8 @@ refusal to infer caste, religion or community)
 named, played and downloadable in-app; catalogue streams for personal listening, labelled as such) · `video-youtube`
 (YouTube search played through the official nocookie embed inside the console; downloads are deliberately not offered)
 · `news-google` (Google News per-country editions, newest first, publisher links resolved for in-app reading; the
-country is asked once, remembered, and can be switched by saying "news from …") · `open-web` (keyless DuckDuckGo/Bing
+country defaults to the India edition and is remembered once stated — switch any time with "news from …", with
+Bing News RSS as the second engine when Google's feed will not come through) · `open-web` (keyless DuckDuckGo/Bing
 search with four structured modes: exam papers with direct PDFs, study material, website discovery including fresh
 Vercel/Netlify projects, and product offer hunting across stores from a pasted Amazon/Flipkart link) ·
 `article-reader` (pulls any article out of its page, extracts key points, and feeds the in-app reader) ·

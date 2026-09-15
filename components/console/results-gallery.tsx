@@ -22,6 +22,7 @@ import type { ViewerRequest } from "@/components/console/viewers";
 import { Badge } from "@/components/ui/badge";
 import { forceDownload } from "@/lib/client/download";
 import { looksLikePdf } from "@/lib/client/web-search";
+import { saveYoutubeVideo, youtubeIdOfEmbed } from "@/lib/client/youtube-save";
 import type { ArticleItem, MediaItem } from "@/lib/types";
 
 import { cn, truncate } from "@/lib/utils";
@@ -248,6 +249,7 @@ function ClipRow({
   onOpenViewer: (request: ViewerRequest) => void;
 }) {
   const embeddable = Boolean(item.embedUrl);
+  const [saving, setSaving] = useState(false);
   return (
     <li className="flex items-center gap-2.5 rounded-xl border border-hairline bg-surface p-2">
       <span className="relative grid h-12 w-[68px] shrink-0 place-items-center overflow-hidden rounded-lg border border-hairline bg-surface-2">
@@ -290,6 +292,35 @@ function ClipRow({
           <Play className="size-3" />
           {embeddable ? "Play" : "Watch"}
         </button>
+        {embeddable && youtubeIdOfEmbed(item.embedUrl) ? (
+          <button
+            type="button"
+            aria-label={`Download ${item.title}`}
+            disabled={saving}
+            onClick={() => {
+              const id = youtubeIdOfEmbed(item.embedUrl);
+              if (!id) {
+                return;
+              }
+              setSaving(true);
+              const toastId = toast.loading("Looking for a downloadable stream…");
+              void saveYoutubeVideo(id, item.title).then((result) => {
+                setSaving(false);
+                if (result.mode === "saved") {
+                  toast.success(`Saved “${truncate(item.title, 48)}”`, { id: toastId });
+                } else {
+                  toast.info(
+                    "No direct stream answered — the video opened on YouTube instead",
+                    { id: toastId },
+                  );
+                }
+              });
+            }}
+            className="grid size-7 place-items-center rounded-lg border border-hairline text-primary-strong transition-colors hover:bg-primary-soft disabled:opacity-50"
+          >
+            <Download className="size-3.5" />
+          </button>
+        ) : null}
         {!embeddable ? (
           <button
             type="button"
