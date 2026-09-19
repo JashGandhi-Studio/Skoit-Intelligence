@@ -31,6 +31,8 @@ import {
   Loader2,
   LocateFixed,
   Map as MapIcon,
+  Mountain,
+  Satellite,
   Search,
   X,
 } from "lucide-react";
@@ -55,32 +57,97 @@ type PlaceInfo = {
   wikiUrl?: string;
 };
 
-/** Keyless raster basemap that behaves everywhere; OSM tiles are the fallback. */
-function rasterStyle(primary: "carto" | "osm"): StyleSpecification {
+/**
+ * Basemaps this globe can wear. Satellite is the default because that is what
+ * people mean by "a globe like Google Earth" — real imagery, with place names
+ * on top so it is readable rather than just pretty.
+ */
+export type BasemapId = "satellite" | "map" | "terrain";
+
+const BASEMAPS: Record<
+  BasemapId,
+  { label: string; hint: string; attribution: string; tiles: string[]; labels?: string[] }
+> = {
+  satellite: {
+    label: "Satellite",
+    hint: "Real satellite and aerial imagery, with place names over the top.",
+    attribution: "Imagery © Esri, Maxar, Earthstar Geographics · Labels © CARTO © OpenStreetMap",
+    // Esri's World Imagery — free, keyless, CORS-open, worldwide, and the same
+    // imagery family the big mapping products show.
+    tiles: [
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    ],
+    labels: [
+      "https://a.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}@2x.png",
+      "https://b.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}@2x.png",
+    ],
+  },
+  map: {
+    label: "Map",
+    hint: "A drawn street map — clearer for roads, borders and dense cities.",
+    attribution: "© OpenStreetMap contributors © CARTO",
+    tiles: [
+      "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
+      "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
+    ],
+  },
+  terrain: {
+    label: "Terrain",
+    hint: "Topographic shading that shows relief — mountains, valleys and plains.",
+    attribution: "© OpenStreetMap contributors · Terrain © Esri",
+    tiles: [
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}",
+    ],
+    labels: [
+      "https://a.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}@2x.png",
+    ],
+  },
+};
+
+/**
+ * Elevation for the 3D relief. Terrarium-encoded PNGs, free and keyless; when
+ * this source is present maplibre tilts real mountains instead of drawing a
+ * flat picture of one.
+ */
+const TERRAIN_SOURCE = {
+  type: "raster-dem" as const,
+  tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+  encoding: "terrarium" as const,
+  tileSize: 256,
+  maxzoom: 13,
+  attribution: "Elevation: Mapzen / AWS Terrain Tiles",
+};
+
+/** Keyless basemap of the requested kind, ready to hand to maplibre. */
+function basemapStyle(id: BasemapId): StyleSpecification {
+  const config = BASEMAPS[id];
+  const sources: StyleSpecification["sources"] = {
+    basemap: {
+      type: "raster",
+      tiles: config.tiles,
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: config.attribution,
+    },
+  };
+  if (config.labels) {
+    sources.labels = {
+      type: "raster",
+      tiles: config.labels,
+      tileSize: 256,
+      maxzoom: 19,
+    };
+  }
   return {
     version: 8,
     projection: { type: "globe" },
-    sources: {
-      basemap: {
-        type: "raster",
-        tiles:
-          primary === "carto"
-            ? [
-                "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
-                "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
-              ]
-            : ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-        tileSize: 256,
-        maxzoom: 19,
-        attribution:
-          primary === "carto"
-            ? "© OpenStreetMap contributors © CARTO"
-            : "© OpenStreetMap contributors",
-      },
-    },
+    sources,
     layers: [
-      { id: "bg", type: "background", paint: { "background-color": "#0b1020" } },
+      { id: "bg", type: "background", paint: { "background-color": "#05070f" } },
       { id: "basemap", type: "raster", source: "basemap" },
+      ...(config.labels
+        ? [{ id: "labels", type: "raster", source: "labels" } as const]
+        : []),
     ],
   };
 }
@@ -200,7 +267,9 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
   const tileErrorsRef = useRef(0);
   const tilesLoadedRef = useRef(false);
   const osmTriedRef = useRef(false);
-  const activeStyleRef = useRef<"carto" | "osm" | "vector">("carto");
+  const activeStyleRef = useRef<BasemapId | "vector">("satellite");
+  /** The basemap the user picked; a tile failure can silently downgrade from this. */
+  const chosenBasemapRef = useRef<BasemapId>("satellite");
   const [ready, setReady] = useState(false);
   const [tilesStalled, setTilesStalled] = useState(false);
   /** A basemap tile has actually painted — the globe is real, not a dark square. */
@@ -209,6 +278,8 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
   const [tilesDead, setTilesDead] = useState(false);
   const [noWebgl, setNoWebgl] = useState(false);
   const [globe, setGlobe] = useState(true);
+  /** Which basemap the globe is wearing (satellite by default, like a globe app). */
+  const [basemap, setBasemap] = useState<BasemapId>("satellite");
   const [query, setQuery] = useState(initialQuery ?? "");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<PlaceResult[]>([]);
@@ -222,8 +293,8 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     setTilesUp(false);
     const map = mapRef.current;
     if (map) {
-      activeStyleRef.current = "carto";
-      map.setStyle(rasterStyle("carto"));
+      activeStyleRef.current = "map";
+      map.setStyle(basemapStyle("map"));
     }
   }, []);
 
@@ -241,7 +312,22 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
       const probe = document.createElement("canvas");
       // maplibre-gl v6 draws through WebGL2; without it the globe would be a
       // silent black square, so the console says so instead.
-      if (!probe.getContext("webgl2")) {
+      const gl = probe.getContext("webgl2");
+      if (!gl) {
+        setNoWebgl(true);
+        return;
+      }
+      // A software renderer (SwiftShader / llvmpipe / basic-render) reports a
+      // context but cannot keep up: maplibre then blocks the main thread and
+      // the whole tab stops responding — a frozen page is worse than an honest
+      // fallback, especially on low-end phones. Detect it and stop here.
+      const debug = gl.getExtension("WEBGL_debug_renderer_info");
+      const renderer = String(
+        (debug && gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)) ||
+          gl.getParameter(gl.RENDERER) ||
+          "",
+      );
+      if (/swiftshader|llvmpipe|software|basic render|mesa offscreen|softpipe/i.test(renderer)) {
         setNoWebgl(true);
         return;
       }
@@ -252,10 +338,10 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
 
     let cancelled = false;
     tileErrorsRef.current = 0;
-    activeStyleRef.current = "carto";
+    activeStyleRef.current = chosenBasemapRef.current;
     const map = new maplibregl.Map({
       container,
-      style: rasterStyle("carto"),
+      style: basemapStyle("satellite"),
       center: [20, 15],
       zoom: 1.6,
       attributionControl: { compact: true },
@@ -276,15 +362,49 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
       "top-right",
     );
 
-    const onStyleLoad = () => {
-      if (cancelled) {
-        return;
-      }
+    /**
+     * Everything that turns a flat tile grid into a planet: the globe
+     * projection, the atmosphere you see from orbit, and real elevation so
+     * mountains have height instead of being a photograph of height.
+     */
+    const applyPlanetLook = () => {
       try {
         map.setProjection({ type: "globe" });
       } catch {
         /* globe unsupported → flat map is fine */
       }
+      // Sky + atmosphere: the blue rim and halo that make it read as a planet
+      // seen from space rather than a map in a box. Ignored by older maplibre.
+      try {
+        map.setSky({
+          "sky-color": "#05070f",
+          "sky-horizon-blend": 0.6,
+          "horizon-color": "#2b6cb0",
+          "horizon-fog-blend": 0.7,
+          "fog-color": "#0b1830",
+          "fog-ground-blend": 0.85,
+          "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 7, 0.6, 12, 0],
+        } as never);
+      } catch {
+        /* no sky support — the globe still works */
+      }
+      // 3D relief from free elevation tiles. Only added once, and only when the
+      // renderer can afford it.
+      try {
+        if (!map.getSource("terrain")) {
+          map.addSource("terrain", TERRAIN_SOURCE as never);
+        }
+        map.setTerrain({ source: "terrain", exaggeration: 1.25 });
+      } catch {
+        /* no terrain support — a flat globe is still a globe */
+      }
+    };
+
+    const onStyleLoad = () => {
+      if (cancelled) {
+        return;
+      }
+      applyPlanetLook();
       setReady(true);
     };
     map.on("style.load", onStyleLoad);
@@ -309,8 +429,8 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
         !("tile" in event) &&
         activeStyleRef.current === "vector"
       ) {
-        activeStyleRef.current = "carto";
-        map.setStyle(rasterStyle("carto"));
+        activeStyleRef.current = "satellite";
+        map.setStyle(basemapStyle("satellite"));
         return;
       }
       if ("sourceId" in event && event.sourceId !== "basemap") {
@@ -321,7 +441,8 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
         setTilesStalled(true);
         if (!cancelled) {
           tileErrorsRef.current = 0;
-          map.setStyle(rasterStyle("osm"));
+          activeStyleRef.current = "map";
+          map.setStyle(basemapStyle("map"));
         }
       }
     });
@@ -336,7 +457,7 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
         setTilesDead(true);
         setTilesStalled(true);
       }
-    }, 9000);
+    }, 6000);
 
     (async () => {
       try {
@@ -523,9 +644,40 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
     }
   }, [globe]);
 
+  /** Swap the basemap in place, keeping the camera exactly where it is. */
+  const chooseBasemap = useCallback((next: BasemapId) => {
+    setBasemap(next);
+    chosenBasemapRef.current = next;
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+    tileErrorsRef.current = 0;
+    setTilesStalled(false);
+    setTilesDead(false);
+    tilesLoadedRef.current = false;
+    activeStyleRef.current = next;
+    try {
+      map.setStyle(basemapStyle(next), { diff: false });
+    } catch {
+      /* keep whatever is on screen */
+    }
+  }, []);
+
   return (
     <div className="relative h-full w-full overflow-hidden bg-surface-2">
       <div ref={containerRef} className="absolute inset-0" />
+
+      {/* Never show an empty dark panel: while the first tiles are being drawn
+          say so, so the wait reads as loading rather than as broken. */}
+      {!tilesUp && !noWebgl && !tilesDead ? (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-[#070b14]">
+          <div className="flex items-center gap-2.5 rounded-full border border-white/15 bg-black/55 px-4 py-2 text-[12px] text-white/85 backdrop-blur">
+            <Globe2 className="size-4 animate-spin text-cyan-300" />
+            Drawing the globe…
+          </div>
+        </div>
+      ) : null}
 
       {noWebgl || tilesDead ? (
         <div className="absolute inset-0 grid place-items-center bg-[#070b14] p-6 text-center">
@@ -602,18 +754,43 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
         ) : null}
       </div>
 
-      {/* globe / flat toggle */}
-      <button
-        type="button"
-        onClick={toggleGlobe}
-        className={cn(
-          "absolute top-24 right-2.5 z-10 flex items-center gap-1.5 rounded-xl border border-hairline bg-surface/95 px-2.5 py-2 text-[11.5px] font-medium shadow-pop backdrop-blur transition-colors",
-          globe ? "text-primary" : "text-muted-foreground",
-        )}
-      >
-        {globe ? <Globe2 className="size-4" /> : <MapIcon className="size-4" />}
-        {globe ? "Globe" : "Flat"}
-      </button>
+      {/* view controls: basemap picker + globe/flat, the way a mapping app does it */}
+      <div className="absolute top-24 right-2.5 z-10 flex flex-col items-end gap-1.5">
+        <div className="flex overflow-hidden rounded-xl border border-hairline bg-surface/95 shadow-pop backdrop-blur">
+          {(Object.keys(BASEMAPS) as BasemapId[]).map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => chooseBasemap(id)}
+              title={BASEMAPS[id].hint}
+              className={cn(
+                "flex items-center gap-1 px-2.5 py-2 text-[11.5px] font-medium transition-colors",
+                basemap === id
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-surface-2",
+              )}
+            >
+              {id === "satellite" ? <Satellite className="size-3.5" /> : null}
+              {id === "map" ? <MapIcon className="size-3.5" /> : null}
+              {id === "terrain" ? <Mountain className="size-3.5" /> : null}
+              {BASEMAPS[id].label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={toggleGlobe}
+          title={globe ? "Switch to a flat map" : "Switch back to the 3D globe"}
+          className={cn(
+            "flex items-center gap-1.5 rounded-xl border border-hairline bg-surface/95 px-2.5 py-2 text-[11.5px] font-medium shadow-pop backdrop-blur transition-colors",
+            globe ? "text-primary" : "text-muted-foreground",
+          )}
+        >
+          {globe ? <Globe2 className="size-4" /> : <MapIcon className="size-4" />}
+          {globe ? "3D globe" : "Flat map"}
+        </button>
+      </div>
 
       {/* tiles struggling: say so, with a retry */}
       {tilesStalled ? (
@@ -622,7 +799,7 @@ export function MapExplorer({ initialQuery }: { initialQuery?: string }) {
           onClick={() => {
             setTilesStalled(false);
             tileErrorsRef.current = 0;
-            mapRef.current?.setStyle(rasterStyle("carto"));
+            mapRef.current?.setStyle(basemapStyle(chosenBasemapRef.current));
           }}
           className="absolute top-36 right-2.5 z-10 flex max-w-[200px] items-start gap-1.5 rounded-xl border border-warning/40 bg-surface/95 px-2.5 py-2 text-left text-[11px] text-muted-foreground shadow-pop backdrop-blur"
         >

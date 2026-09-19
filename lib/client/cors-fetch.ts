@@ -128,8 +128,11 @@ async function raceRoutes(
     const onCancel = () => {
       cancelled = true;
       reject(new Error("aborted"));
-    };
-    outerSignal?.addEventListener("abort", onCancel, { once: true });
+    };    outerSignal?.addEventListener("abort", onCancel, { once: true });
+    // The race settles once; leaving this listener attached made every later
+    // call on the same signal stack another listener (MaxListeners warnings and
+    // a real leak across a long run).
+    const release = () => outerSignal?.removeEventListener("abort", onCancel);
     routes.forEach((route, index) => {
       const start = async () => {
         try {
@@ -142,6 +145,7 @@ async function raceRoutes(
           if (!settled) {
             if (response.ok) {
               settled = true;
+              release();
               resolve({ label: route.label, response });
             } else {
               throw new Error(String(response.status));
@@ -152,6 +156,7 @@ async function raceRoutes(
             failures += 1;
             if (failures >= routes.length) {
               settled = true;
+              release();
               reject(new Error(`all ${routes.length} route(s) failed`));
             }
           }

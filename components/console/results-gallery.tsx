@@ -3,6 +3,7 @@
 import {
   AudioLines,
   BookOpen,
+  ChevronDown,
   Download,
   ExternalLink,
   FileText,
@@ -15,7 +16,7 @@ import {
   TriangleAlert,
   Video,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { OffersTable, PapersShelf, TranslateStrip } from "@/components/console/shelves";
 import type { ViewerRequest } from "@/components/console/viewers";
@@ -440,6 +441,57 @@ function ArticleRow({
   );
 }
 
+
+/**
+ * Progressive reveal: show the first `step` items, and a "show more" control
+ * that reveals the next batch and tells you exactly how many are left. Finding
+ * 22 videos should feel like a shelf you can browse, not a wall you must take
+ * in at once — and nothing found is ever thrown away behind a silent slice.
+ */
+function useReveal(total: number, step: number, initial: number) {
+  const [shown, setShown] = useState(Math.min(initial, total));
+  // A new search replaces the list; start its reveal from the top again.
+  const lastTotal = useRef(total);
+  if (lastTotal.current !== total) {
+    lastTotal.current = total;
+    if (shown > Math.min(initial, total) && total > shown) {
+      setShown(Math.min(initial, total));
+    }
+  }
+  const showMore = () => setShown((current) => Math.min(current + step, total));
+  return { shown, showMore, remaining: Math.max(total - shown, 0) };
+}
+
+function ShowMore({
+  remaining,
+  onClick,
+  noun,
+  step,
+}: {
+  remaining: number;
+  onClick: () => void;
+  noun: string;
+  step: number;
+}) {
+  if (remaining <= 0) {
+    return null;
+  }
+  const next = Math.min(step, remaining);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-hairline bg-surface px-3 py-2 text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-surface-2 hover:text-foreground"
+    >
+      <ChevronDown className="size-3.5" />
+      Show {next} more {noun}
+      <span className="text-faint-foreground">
+        ({remaining} left)
+      </span>
+    </button>
+  );
+}
+
 export function ResultsGallery({
   media,
   articles,
@@ -456,6 +508,12 @@ export function ResultsGallery({
 
   const items = media ?? [];
   const reports = articles ?? [];
+  // Reveal budgets per shelf. The first screen stays calm; one tap doubling it
+  // is far better than scrolling past sixteen thumbnails you did not ask for.
+  const imageReveal = useReveal(items.filter((item) => item.kind === "image").length, 12, 8);
+  const clipReveal = useReveal(items.filter((item) => item.kind === "video").length, 10, 6);
+  const audioReveal = useReveal(items.filter((item) => item.kind === "audio").length, 10, 6);
+  const reportReveal = useReveal(reports.filter((item) => item.shelf !== "papers" && item.shelf !== "offers").length, 12, 8);
   const images = items.filter((item) => item.kind === "image");
   const clips = items.filter((item) => item.kind === "video");
   const audio = items.filter((item) => item.kind === "audio");
@@ -512,10 +570,18 @@ export function ResultsGallery({
 
       {images.length > 0 ? (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-          {images.slice(0, 16).map((item) => (
+          {images.slice(0, imageReveal.shown).map((item) => (
             <ImageTile key={item.id} item={item} onOpenViewer={onOpenViewer} />
           ))}
         </div>
+      ) : null}
+      {images.length > 0 ? (
+        <ShowMore
+          remaining={imageReveal.remaining}
+          onClick={imageReveal.showMore}
+          noun="images"
+          step={12}
+        />
       ) : null}
 
       {audio.length > 0 ? (
@@ -525,10 +591,16 @@ export function ResultsGallery({
             Audio
           </p>
           <ul className="space-y-2">
-            {audio.slice(0, 8).map((item) => (
+            {audio.slice(0, audioReveal.shown).map((item) => (
               <AudioLine key={item.id} item={item} />
             ))}
           </ul>
+          <ShowMore
+            remaining={audioReveal.remaining}
+            onClick={audioReveal.showMore}
+            noun="tracks"
+            step={10}
+          />
         </div>
       ) : null}
 
@@ -539,10 +611,16 @@ export function ResultsGallery({
             Footage
           </p>
           <ul className="space-y-2">
-            {clips.slice(0, 10).map((item) => (
+            {clips.slice(0, clipReveal.shown).map((item) => (
               <ClipRow key={item.id} item={item} onOpenViewer={onOpenViewer} />
             ))}
           </ul>
+          <ShowMore
+            remaining={clipReveal.remaining}
+            onClick={clipReveal.showMore}
+            noun="clips"
+            step={10}
+          />
         </div>
       ) : null}
 
@@ -568,7 +646,7 @@ export function ResultsGallery({
             />
           ) : null}
           <ul className="space-y-2">
-            {plainReports.slice(0, 12).map((item) => (
+            {plainReports.slice(0, reportReveal.shown).map((item) => (
               <ArticleRow
                 key={item.id}
                 item={item}
@@ -584,6 +662,12 @@ export function ResultsGallery({
               />
             ))}
           </ul>
+          <ShowMore
+            remaining={reportReveal.remaining}
+            onClick={reportReveal.showMore}
+            noun="articles"
+            step={12}
+          />
         </div>
       ) : null}
 

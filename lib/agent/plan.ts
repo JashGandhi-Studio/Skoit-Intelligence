@@ -708,6 +708,39 @@ function planFromMessage(
 
   const retrievalOnly = intent.kinds.length > 0 && hardTargets.length === 0;
 
+  // A company-filings ask goes straight to the regulator's own index. Checked
+  // before the retrieval branch so wording like "10-K", "8-K" or "annual
+  // report" is never captured by a generic article/news search instead.
+  const filingsAsk =
+    /\b(?:sec|edgar|filings?)\b|\b1[03]-?[kq]\b|\b[68]-?k\b|\b20-?f\b|\bdef\s*14a\b|\bproxy statement\b|\b(?:annual|quarterly)\s+report\b/i.test(
+      message,
+    ) && hardTargets.length === 0;
+  if (filingsAsk) {
+    const skill = getSkill("public-filings");
+    if (skill) {
+      const company =
+        (intent.topic || message)
+          .replace(
+            /\b(?:sec|edgar|filings?|10-?k|10-?q|8-?k|20-?f|6-?k|13-?[fd]|def\s*14a|annual|report|quarterly|proxy|statement|show|me|of|for|the|latest)\b/gi,
+            " ",
+          )
+          .replace(/\s+/g, " ")
+          .trim() || intent.topic || message;
+      addStep(skill, {
+        ...targetLike(message),
+        meta: { query: company.slice(0, 120) },
+      });
+      return {
+        targets,
+        steps,
+        rationale: `A company-filings question: the U.S. SEC's own EDGAR full-text index is searched for “${company.slice(0, 60)}” — form type, filing date and a direct link to each document. Only companies registered with the SEC appear; private and non-U.S. companies will not.`,
+        mode: "focused",
+        intent,
+      };
+    }
+  }
+
+
   const provenanceAsk = PROVENANCE_KEYWORDS.test(message);
 
   if (retrievalOnly) {

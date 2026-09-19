@@ -213,25 +213,84 @@ interface JioSong {
   id?: string;
   name?: string;
   title?: string;
+  subtitle?: string;
   year?: string | number;
   duration?: string | number;
   language?: string;
   label?: string;
   url?: string;
   perma_url?: string;
-  image?: Array<{ quality?: string; link?: string; url?: string }>;
+  /**
+   * The official api.php returns `image` as a single URL string, while the
+   * saavn.dev shape returns a quality array. Both are accepted — assuming one
+   * shape is what made every official-API result throw and report "unreachable".
+   */
+  image?: string | Array<{ quality?: string; link?: string; url?: string }>;
   downloadUrl?: Array<{ quality?: string; link?: string; url?: string }>;
   primaryArtists?: string | string[];
   more_info?: {
     encrypted_media_url?: string;
-    primaryArtists?: string[];
+    primaryArtists?: string[] | string;
     singerList?: string;
+    music?: string;
     album?: string;
     duration?: string | number;
     language?: string;
     label?: string;
     perma_url?: string;
+    /** Where the official API actually keeps the credited artists. */
+    artistMap?: {
+      primary_artists?: Array<{ name?: string }>;
+      featured_artists?: Array<{ name?: string }>;
+      artists?: Array<{ name?: string }>;
+    };
   };
+}
+
+/** Credited artists, preferring the primary list the catalogue itself shows. */
+function artistsOf(song: JioSong): string | undefined {
+  const map = song.more_info?.artistMap;
+  const pick = (list?: Array<{ name?: string }>) =>
+    (list ?? []).map((a) => a?.name?.trim()).filter(Boolean).join(", ");
+  const primary = pick(map?.primary_artists);
+  if (primary) {
+    return primary;
+  }
+  const featured = pick(map?.featured_artists);
+  if (featured) {
+    return featured;
+  }
+  const all = pick(map?.artists);
+  return all || song.more_info?.music?.trim() || undefined;
+}
+
+/** A song's cover art as a URL, whichever shape the source used. */
+function coverArt(image: JioSong["image"]): string | undefined {
+  if (!image) {
+    return undefined;
+  }
+  if (typeof image === "string") {
+    return hiResImage(image);
+  }
+  if (Array.isArray(image)) {
+    const best =
+      image.find((entry) => String(entry.quality ?? "").includes("500")) ?? image[0];
+    return hiResImage(best?.link ?? best?.url);
+  }
+  return undefined;
+}
+
+/**
+ * The official API puts "Artist, Artist - Album" in `subtitle`; it is the most
+ * reliable artist/album source it offers when the structured fields are absent.
+ */
+function subtitleParts(song: JioSong): { artists?: string; album?: string } {
+  const subtitle = typeof song.subtitle === "string" ? song.subtitle.trim() : "";
+  if (!subtitle) {
+    return {};
+  }
+  const [left, ...rest] = subtitle.split(" - ");
+  return { artists: left?.trim() || undefined, album: rest.join(" - ").trim() || undefined };
 }
 
 async function viaJioSaavnApi(query: string, limit: number, signal?: AbortSignal) {
@@ -246,6 +305,12 @@ async function viaJioSaavnApi(query: string, limit: number, signal?: AbortSignal
   }
   return fetched.data.results.map<SaavnTrack>((song) => {
     const info = song.more_info ?? {};
+    const parts = subtitleParts(song);
+    const structuredArtists = Array.isArray(info.primaryArtists)
+      ? info.primaryArtists.filter(Boolean).join(", ")
+      : typeof info.primaryArtists === "string"
+        ? info.primaryArtists
+        : undefined;
     const direct =
       pickQuality(song.downloadUrl as SaavnDevDownload[], "320") ??
       (song.downloadUrl as SaavnDevDownload[] | undefined)?.[0]?.url ??
@@ -260,29 +325,23 @@ async function viaJioSaavnApi(query: string, limit: number, signal?: AbortSignal
       id: String(song.id ?? newId("sv")),
       title: decodeEntities(song.name ?? song.title ?? "Unknown title"),
       artist:
-        (Array.isArray(info.primaryArtists)
-          ? info.primaryArtists.join(", ")
-          : undefined) ??
-        (typeof song.primaryArtists === "string" ? song.primaryArtists : undefined) ??
+        structuredArtists ??
+        artistsOf(song) ??
         info.singerList ??
+        parts.artists ??
+        (typeof song.primaryArtists === "string" ? song.primaryArtists : undefined) ??
         "Unknown artist",
-      album:
-        info.album ??
-        (typeof song === "object" && "album" in song
-          ? String((song as { album?: { name?: string } }).album?.name ?? "") || undefined
-          : undefined),
+      album: info.album
+        ? decodeEntities(info.album)
+        : parts.album
+          ? decodeEntities(parts.album)
+          : undefined,
       year: song.year ? String(song.year) : undefined,
       language: song.language ?? info.language,
       durationSec: Number(song.duration ?? info.duration) || undefined,
-      imageUrl: hiResImage(
-        (song.image as Array<{ quality?: string; link?: string }> | undefined)?.find(
-          (entry) => String(entry.quality ?? "").includes("500"),
-        )?.link ??
-          song.image?.[0]?.link ??
-          song.image?.[0]?.url,
-      ),
+      imageUrl: coverArt(song.image),
       streamUrl: stream,
-      permaUrl: song.url ?? info.perma_url,
+      permaUrl: song.perma_url ?? song.url ?? info.perma_url,
       label: song.label ?? info.label,
       via: "jiosaavn",
     };
@@ -306,19 +365,23 @@ export async function saavnSearch(
   const limit = Math.min(options.limit ?? 12, 30);
   const errors: string[] = [];
 
-  const dev = await viaSaavnDev(query, limit, options.signal).catch(() => undefined);
-  let tracks = dev && dev.length > 0 ? dev : [];
+  // The official api.php is tried first. It is the catalogue owner's own
+  // endpoint and answers from the server directly and from a browser through
+  // the relay chain; saavn.dev — once the primary — no longer resolves at all,
+  // so putting it first cost every song request a dead round-trip.
+  const jio = await viaJioSaavnApi(query, limit, options.signal).catch(() => undefined);
+  let tracks = jio && jio.length > 0 ? jio : [];
 
   if (tracks.length === 0) {
-    const jio = await viaJioSaavnApi(query, limit, options.signal).catch(() => undefined);
-    if (jio && jio.length > 0) {
-      tracks = jio;
-    } else {
-      if (!dev) {
-        errors.push("saavn.dev unreachable");
-      }
-      errors.push("jiosaavn api unreachable");
+    const dev = await viaSaavnDev(query, limit, options.signal).catch(() => undefined);
+    if (dev && dev.length > 0) {
+      tracks = dev;
     }
+  }
+
+  if (tracks.length === 0 && !jio) {
+    errors.push("jiosaavn api unreachable");
+    errors.push("saavn.dev unreachable");
   }
 
   // Drop tracks with no playable link — a result that cannot play is not a result.

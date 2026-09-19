@@ -494,6 +494,91 @@ const PLATFORMS: Array<{
     },
   },
   {
+    id: "bluesky",
+    label: "Bluesky",
+    url: (user) =>
+      `https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(user)}.bsky.social`,
+    parse: (body: any) => ({
+      name: body?.displayName,
+      bio: body?.description,
+      joined: body?.createdAt?.slice(0, 10),
+      followers: body?.followersCount,
+      posts: body?.postsCount,
+    }),
+  },
+  {
+    id: "mastodon",
+    label: "Mastodon (mastodon.social)",
+    url: (user) =>
+      `https://mastodon.social/api/v1/accounts/lookup?acct=${encodeURIComponent(user)}`,
+    parse: (body: any) => ({
+      name: body?.display_name,
+      bio: typeof body?.note === "string" ? body.note.replace(/<[^>]+>/g, " ").slice(0, 300) : undefined,
+      joined: body?.created_at?.slice(0, 10),
+      followers: body?.followers_count,
+      posts: body?.statuses_count,
+    }),
+  },
+  {
+    id: "dockerhub",
+    label: "Docker Hub",
+    url: (user) => `https://hub.docker.com/v2/users/${encodeURIComponent(user)}/`,
+    parse: (body: any) => ({
+      name: body?.full_name,
+      company: body?.company,
+      location: body?.location,
+      joined: body?.date_joined?.slice(0, 10),
+      bio: body?.profile_url,
+    }),
+  },
+  {
+    id: "huggingface",
+    label: "Hugging Face",
+    url: (user) => `https://huggingface.co/api/users/${encodeURIComponent(user)}/overview`,
+    parse: (body: any) => ({
+      name: body?.fullname,
+      orgs: Array.isArray(body?.orgs) ? body.orgs.map((o: any) => o?.name).filter(Boolean).join(", ") : undefined,
+      models: body?.numModels,
+      datasets: body?.numDatasets,
+      pro: body?.isPro,
+    }),
+  },
+  {
+    id: "launchpad",
+    label: "Launchpad",
+    url: (user) => `https://api.launchpad.net/1.0/~${encodeURIComponent(user)}`,
+    parse: (body: any) => ({
+      name: body?.display_name,
+      location: (body?.location ?? "").slice(0, 120) || undefined,
+      joined: body?.date_created?.slice(0, 10),
+      karma: body?.karma,
+    }),
+  },
+  {
+    id: "stackoverflow",
+    label: "Stack Overflow",
+    url: (user) =>
+      `https://api.stackexchange.com/2.3/users?inname=${encodeURIComponent(user)}&site=stackoverflow&filter=default`,
+    // The API answers 200 whether or not anyone matches, so the body decides:
+    // a name is only a hit when the returned display name actually matches.
+    parse: (body: any) => {
+      const items = Array.isArray(body?.items) ? body.items : [];
+      if (items.length === 0) {
+        return {};
+      }
+      const best = items[0];
+      return {
+        name: best?.display_name,
+        reputation: best?.reputation,
+        joined: best?.creation_date
+          ? new Date(best.creation_date * 1000).toISOString().slice(0, 10)
+          : undefined,
+        location: best?.location,
+        profile: best?.link,
+      };
+    },
+  },
+  {
     id: "reddit",
     label: "Reddit",
     url: (user) => `https://www.reddit.com/user/${encodeURIComponent(user)}/about.json`,
@@ -591,11 +676,43 @@ export const usernameFootprint: SkillDefinition = {
     }
 
     const entities: Entity[] = [entity(skill, "username", handle, "Handle checked")];
+
+    /**
+     * The same handle is very often several different people — a shared name is
+     * not a shared identity. When the platforms disagree about who this is, say
+     * so loudly rather than letting the reader assume one person.
+     */
+    const distinctNames = [
+      ...new Set(
+        hits
+          .map((hit) => (typeof hit.fields.name === "string" ? hit.fields.name.trim() : ""))
+          .filter((name) => name.length > 1),
+      ),
+    ];
+    const identityConflict = distinctNames.length > 1;
+
     const evidenceItems = [
       evidence(skill, "Accounts located", hits.map((hit) => hit.platform).join(" · "), {
         source: source("identity:platforms", "Platform profile APIs", undefined, "api"),
       }),
     ];
+
+    if (identityConflict) {
+      evidenceItems.push(
+        evidence(
+          skill,
+          "Handle is shared by different people",
+          distinctNames.join(" · "),
+          {
+            kind: "warning",
+            severity: "medium",
+            source: source("identity:platforms", "Platform profile APIs", undefined, "api"),
+            detail:
+              "These platforms report different names for the same handle. A matching handle is NOT proof of one person: treat each account as a separate lead and verify before linking them.",
+          },
+        ),
+      );
+    }
 
     for (const hit of hits) {
       const pairs = Object.entries(hit.fields)

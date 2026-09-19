@@ -83,7 +83,11 @@ export interface Entity {
     | "asn"
     | "pincode"
     | "date"
-    | "document";
+    | "document"
+    | "aircraft"
+    | "company"
+    | "place"
+    | "technology";
   value: string;
   label: string;
   skillId: string;

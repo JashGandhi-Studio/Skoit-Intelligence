@@ -6,6 +6,7 @@ import { indiaSkills } from "./india";
 import { ipSkills } from "./ip";
 import { knowledgeSkills } from "./knowledge";
 import { mediaSkills } from "./media";
+import { allOsintSkills } from "./osint";
 import { retrievalSkills } from "./retrieval";
 import { verifySkills } from "./verify";
 import { webSkills } from "./web";
@@ -21,6 +22,7 @@ export const allSkills: SkillDefinition[] = [
   ...knowledgeSkills,
   ...webSkills,
   ...verifySkills,
+  ...allOsintSkills,
 ];
 
 export const skillById = new Map(allSkills.map((skill) => [skill.id, skill]));

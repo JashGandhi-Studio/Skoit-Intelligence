@@ -6,7 +6,14 @@ export const USER_AGENT =
 const DEFAULT_TIMEOUT = 8000;
 
 export type NetResult<T> =
-  | { ok: true; data: T; status: number; ms: number }
+  | {
+      ok: true;
+      data: T;
+      status: number;
+      ms: number;
+      /** Response headers, when the caller asked for them (technology fingerprinting). */
+      headers?: Headers;
+    }
   | { ok: false; error: SkillError; ms: number };
 
 function classify(error: unknown): SkillError {
@@ -43,6 +50,8 @@ export async function request<T = unknown>(
     retries?: number;
     parse?: "json" | "text";
     accept?: string;
+    /** Keep the response headers on the result (technology fingerprinting). */
+    wantHeaders?: boolean;
   } = {},
 ): Promise<NetResult<T>> {
   const {
@@ -50,6 +59,7 @@ export async function request<T = unknown>(
     retries = 1,
     parse = "json",
     accept,
+    wantHeaders,
     ...rest
   } = init;
   const started = Date.now();
@@ -107,9 +117,10 @@ export async function request<T = unknown>(
         };
       }
 
+      const headers = wantHeaders ? response.headers : undefined;
       const text = await response.text();
       if (parse === "text") {
-        return { ok: true, data: text as unknown as T, status: response.status, ms };
+        return { ok: true, data: text as unknown as T, status: response.status, ms, headers };
       }
       try {
         return {
@@ -117,6 +128,7 @@ export async function request<T = unknown>(
           data: JSON.parse(text) as T,
           status: response.status,
           ms,
+          headers,
         };
       } catch {
         return {
